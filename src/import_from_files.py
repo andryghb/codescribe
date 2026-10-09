@@ -4,6 +4,8 @@ from communication_import_export import import_communication
 from device_tree_import_export import import_device_tree_siblings
 from entrypoint import find_application, find_communication, get_device_entrypoints, get_src_folder
 from import_export import *
+from mode import is_st_only
+import st_sync
 from util import *
 
 
@@ -79,9 +81,17 @@ def import_directory_child(child, dir_path, dir_parent_obj):
 
 
 def import_from_files(project):
+    """Import the export folder into the project.
+
+    In ST-only mode (see mode.py) returns the st_sync.SyncReport of what was
+    added, updated, left alone and skipped; in full mode returns None.
+    """
     src_folder = get_src_folder(project)
     print("Reading from: " + src_folder)
     assert_path_exists(src_folder)
+
+    if is_st_only(project):
+        return import_st_only(project, src_folder)
 
     for device_obj in get_device_entrypoints(project):
         device_folder = os.path.join(src_folder, device_obj.get_name())
@@ -97,3 +107,24 @@ def import_from_files(project):
             import_communication(communication, device_folder)
 
         import_device_tree_siblings(device_obj, device_folder)
+
+    return None
+
+
+def import_st_only(project, src_folder):
+    # Only the application folders are read. Devices, communication and every
+    # non-.st file are the template's business in this mode.
+    report = st_sync.SyncReport()
+    devices = list(get_device_entrypoints(project))
+    for device_obj in devices:
+        device_folder = os.path.join(src_folder, device_obj.get_name())
+        assert_path_exists(device_folder)
+
+        application = find_application(device_obj)
+        application_folder = os.path.join(device_folder, "application")
+        assert_path_exists(application_folder)
+
+        # The device name only disambiguates when there is more than one.
+        label_prefix = device_obj.get_name() + "/" if len(devices) > 1 else ""
+        st_sync.sync_directory(application_folder, application, label_prefix, report)
+    return report

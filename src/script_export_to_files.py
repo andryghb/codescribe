@@ -10,7 +10,9 @@ from device_tree_import_export import export_device_tree_siblings
 from entrypoint import find_application, find_communication, get_device_entrypoints, get_src_folder
 import graphical_export
 from import_export import OBJECT_TYPE_TO_EXPORT_FUNCTION, SERVICE_EXPORT_FUNCTIONS, write_native
+from mode import is_st_only
 from object_type import ObjectType, get_object_type
+from st_export import StExporter
 from util import *
 
 
@@ -47,17 +49,8 @@ def export_child(child_obj, parent_obj, parent_folder_path):
             export_child(c, child_obj, parent_folder_path)
 
 
-try:
-    print_python_version()
-    assert_project_open()
-    graphical_export.reset_stats()
-
-    src_folder = get_src_folder(scriptengine.projects.primary)
-    print("Writing to: " + src_folder)
-
-    staging_folder = begin_export_folder(src_folder)
-
-    for device_obj in get_device_entrypoints(scriptengine.projects.primary):
+def export_full(project, staging_folder):
+    for device_obj in get_device_entrypoints(project):
         device_folder = os.path.join(staging_folder, device_obj.get_name())
         os.mkdir(device_folder)
 
@@ -74,15 +67,52 @@ try:
 
         export_device_tree_siblings(device_obj, device_folder, application, communication)
 
-    finalize_export_folder(src_folder, staging_folder)
 
-    rendering_summary = graphical_export.summary()
-    if rendering_summary is not None:
-        print(rendering_summary)
+def export_st_only(project, staging_folder):
+    # Each device's application folder and nothing else: no devices, no
+    # communication, no native xml beyond the visualisations.
+    exporter = StExporter()
+    for device_obj in get_device_entrypoints(project):
+        device_folder = os.path.join(staging_folder, device_obj.get_name())
+        os.mkdir(device_folder)
+
+        application = find_application(device_obj)
+        application_folder = os.path.join(device_folder, "application")
+        os.mkdir(application_folder)
+
+        exporter.export_children(application, application_folder)
+    return exporter.stats
+
+
+try:
+    print_python_version()
+    assert_project_open()
+    graphical_export.reset_stats()
+
+    src_folder = get_src_folder(scriptengine.projects.primary)
+    print("Writing to: " + src_folder)
+    st_only = is_st_only(scriptengine.projects.primary)
+    print("Mode: " + ("st-only" if st_only else "full"))
+
+    staging_folder = begin_export_folder(src_folder)
+
+    summary = ""
+    if st_only:
+        stats = export_st_only(scriptengine.projects.primary, staging_folder)
+        finalize_export_folder(src_folder, staging_folder)
+        summary = "\n\n" + stats.summary()
+        print(stats.summary())
+    else:
+        export_full(scriptengine.projects.primary, staging_folder)
+        finalize_export_folder(src_folder, staging_folder)
+
+        rendering_summary = graphical_export.summary()
+        if rendering_summary is not None:
+            print(rendering_summary)
 except Exception as e:
     print(e)
     ui_error_with_traceback("Export To Files failed!")
     raise e
 
 print("Done!")
-ui_info("Export To Files complete.\n\nWrote: " + src_folder)
+ui_info("Export To Files complete.\n\nWrote: " + src_folder + summary)

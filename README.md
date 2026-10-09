@@ -25,7 +25,7 @@ CODESCRIBE supplies five scripts that run inside the CODESYS ScriptEngine and ap
 ![toolbar](docs/toolbar.png)
 
 - `Export To Files` exports the project to plaintext files that can be tracked in source control, as well as edited in other editors
-- `Import From Files` imports plaintext files back into a CODESYS project for uploading / debugging / etc
+- `Import From Files` imports plaintext files back into a CODESYS project for uploading / debugging / etc (in the default `st-only` mode only the `.st` files that differ from the project are applied, and a dialog reports what changed)
 - `Save As Template` generates a "template" project by making a copy of the current project and deleting all exportable objects
 - `Update From Template` updates the current working project by copying the template file and importing the plaintext files
 - `Export Lib To Files` exports a library project, which keeps its objects directly under the project root rather than under a Device (see [Export Lib To Files](#export-lib-to-files))
@@ -39,7 +39,62 @@ A typical workflow:
 
 Each script reports its outcome in a dialog when it finishes. Failures show the full Python traceback, so problems do not hide in the message view.
 
-## What gets exported
+## Export modes
+
+CODESCRIBE has two modes. The mode is chosen per project by a `codescribe.json` file in the same folder as the `.project` file, so it travels with the project and its export in git:
+
+```json
+{"mode": "st-only"}
+```
+
+- `st-only` is the default, used when the file is absent. Only structured text is exported and imported; see [ST-only mode](#st-only-mode).
+- `full` is the behaviour of earlier versions: everything the project carries (devices, communication, task configuration, graphical POUs) is exported as native xml alongside the `.st` files, and the import removes and recreates every tracked object. See [What gets exported (full mode)](#what-gets-exported-full-mode) and the sections that follow it.
+
+The `GraphicalTesting` sample in this repository keeps a `codescribe.json` set to `full`, as its committed export was made that way.
+
+## ST-only mode
+
+### What gets exported
+
+`Export To Files` walks each device's `application` folder and its subfolders, and writes:
+
+- Folders
+- POUs with a textual implementation, as `<name>.st` (declaration, then `// --- BEGIN IMPLEMENTATION ---`, then implementation)
+- Methods as `<pou>.<name>.st`, actions as `<pou>.<name>.action.st` and transitions as `<pou>.<name>.transition.st`, when their body is structured text
+- Properties as `<pou>.<name>.property.st`: the property declaration, then one section per accessor headed `// --- BEGIN Get ---` or `// --- BEGIN Set ---`, each a declaration and implementation like a method
+- DUTs as `<name>.st`
+- GVLs, including persistent variable lists, as `<name>.gvl.st` (declaration only, no xml)
+- Visualisations as `<name>.vis.xml` - the one xml this mode keeps, so the HMI is reviewable. It is export-only: the import never reads it, and the project template carries the real object
+
+Nothing else is written: no `devices` or `communication` folders, no task configuration, no GVL or EVC xml, no library list, no visualisation manager, no graphical POU xml and no `.txt` renderings. A ladder, FBD, CFC or SFC POU is skipped, but its structured text methods and actions are still written beside where its file would be. The export dialog counts the files written and names every object it skipped.
+
+### What the import does
+
+`Import From Files` reads only `.st` files and ignores everything else, the `.vis.xml` included. Each file is compared with the object it describes:
+
+- the object is missing: it is created and the text applied (**Added**)
+- the object exists but its declaration or implementation differs: the differing text is replaced in place (**Updated**)
+- the text already matches: the object is not touched (**Unchanged**)
+
+Line endings, a byte order mark and blank lines at the start or end of a file are not differences. Nothing is removed and recreated, so object GUIDs, network variable list settings, the accessors of a property and any graphical member of a POU stay exactly as they were. Objects in the project that have no `.st` file on disk are listed in the report and left alone; delete them in CODESYS if they are gone from the source. A file that cannot be applied - its kind clashes with the project (a `TYPE` where the project holds a POU), its parent POU does not exist, or the project object is graphical - is reported as **Failed** and the rest of the import carries on.
+
+When it finishes, a dialog shows a short report (added, updated, unchanged, not on disk, failed; long lists are cut off) and the full report is printed to the message view. If anything failed, the dialog is an error and the script fails after it.
+
+### Templates
+
+`Save As Template` removes from the template copy only what the ST-only import can recreate: ST POUs whose members are all structured text, DUTs, GVLs, and the structured text members of POUs it has to keep. Graphical POUs, task configuration, devices, communication and visualisations stay in the template. `Update From Template` copies the template over the project and runs the same import, so it shows the same report with everything under **Added**.
+
+### Not tracked in this mode
+
+The project template carries all of this, and a change to it is not seen in git:
+
+- Task configuration (cycle times, which programs run)
+- Graphical POUs, actions, methods and properties (LD, FBD, CFC, SFC)
+- Interfaces (not exported in either mode yet)
+- Devices, communication, EVCs, text lists, image pools and the manager objects
+- The network settings of a network variable list: an existing list is updated in place and keeps them, but one created from a template becomes a plain GVL
+
+## What gets exported (full mode)
 
 - Folders
 - POUs
@@ -121,7 +176,7 @@ Importing a library export back into a project is not yet supported.
 
 ## Project Templates
 
-CODESCRIBE exports the implementation logic of the project, not a complete copy. An empty, but configured, underlying project file should also be committed to the repo to manage any other configuration that CODESYS provides (e.g. project level configuration, device configuration). For example, `Example Project_template_v1.project`:
+CODESCRIBE exports the implementation logic of the project, not a complete copy (in `st-only` mode, only the structured text of it - see [ST-only mode](#st-only-mode)). An empty, but configured, underlying project file should also be committed to the repo to manage any other configuration that CODESYS provides (e.g. project level configuration, device configuration). For example, `Example Project_template_v1.project`:
 
 ![example_template_file](docs/example_template_file.png)
 
@@ -132,6 +187,8 @@ A template file can be generated from an existing project file by using the `Sav
 To generate a project from a template file, you need two things: the `<project_name>_template_v<X>.project` file and a folder named `<project_name>` with the files exported by the `Export To Files` script. To generate a project, copy the template project in the same location and rename it to `<project_name>.project`. Open the copy with CODESYS and use the `Import From Files` button to import the project files.
 
 ## Exporting and Importing Communication Devices
+
+_Full mode only; `st-only` mode exports no devices at all._
 
 Exporting communication devices has been hardcoded to create folders for top-level devices under `Communication`. Any devices under these top-level devices will be exported using native CODESYS xml. This is done because the top-level devices can not be removed from the CODESYS project.
 
@@ -237,8 +294,10 @@ The scripts run inside the CODESYS ScriptEngine, which embeds IronPython 2.7:
 CI runs three jobs on every pull request (see `.github/workflows/ci.yml` and `tools/ci/`):
 
 - `ascii-check`: fails on any non-ASCII byte in `src/*.py`, then compiles every src file with Python 3.
-- `ironpython`: compiles every src file with real IronPython 2.7.12 (catches Python 2 syntax errors), imports the library modules against a stubbed `scriptengine` (catches module-scope errors), and runs the four renderer test suites under IronPython 2.7.
-- `ladder`: runs the same four renderer test suites under Python 3.
+- `ironpython`: compiles every src file with real IronPython 2.7.12 (catches Python 2 syntax errors), imports the library modules against a stubbed `scriptengine` (catches module-scope errors), and runs the four renderer test suites and the two ST-only test suites under IronPython 2.7.
+- `ladder`: runs the same test suites under Python 3.
+
+The ST-only tests (`tools/st/tests/`) drive the export, the import and the template stripping against a small fake of the ScriptEngine object tree, as CODESYS itself is not available in CI.
 
 Note that `python -m py_compile` under Python 3 is not a sufficient local check; it misses both failure classes above.
 

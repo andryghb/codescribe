@@ -51,6 +51,15 @@ jobs:
           .\ipy\net45\ipy.exe tools\ladder\tests\test_xmlbackend.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # The ST-only export and import run inside CODESYS too.
+      - name: ST-only tests under IronPython 2.7
+        shell: pwsh
+        run: |
+          .\ipy\net45\ipy.exe tools\st\tests\test_st_files.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\ipy\net45\ipy.exe tools\st\tests\test_st_sync.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   ladder:
     name: ladder
     runs-on: ubuntu-latest
@@ -62,3 +71,7 @@ jobs:
           python3 tools/ladder/tests/test_fbd.py
           python3 tools/ladder/tests/test_export.py
           python3 tools/ladder/tests/test_xmlbackend.py
+      - name: ST-only tests under Python 3
+        run: |
+          python3 tools/st/tests/test_st_files.py
+          python3 tools/st/tests/test_st_sync.py
