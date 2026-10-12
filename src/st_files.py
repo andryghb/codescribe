@@ -76,6 +76,11 @@ def visualisation_file_name(name):
     return name + VISUALISATION_EXTENSION
 
 
+def task_configuration_file_name(name):
+    # Same name as full mode writes, so switching modes does not rename it.
+    return name + ".xml"
+
+
 def is_st_file_name(file_name):
     return file_name.endswith(ST_EXTENSION)
 
