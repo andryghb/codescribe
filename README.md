@@ -76,10 +76,11 @@ Nothing else is written: no `devices` or `communication` folders, no GVL or EVC 
 - the object is missing: it is created and the text applied (**Added**)
 - the object exists but its declaration or implementation differs: the differing text is replaced in place (**Updated**)
 - the text already matches: the object is not touched (**Unchanged**)
+- the object is in the project but its `.st` file is gone: it is removed (**Removed**). A POU goes with its members, a member alone, a DUT or GVL alone; a folder with no directory on disk loses its tracked objects and goes once it is empty. Graphical POUs and everything else the export does not write are never removed
 
-Line endings, a byte order mark and blank lines at the start or end of a file are not differences. Nothing is removed and recreated, so object GUIDs, network variable list settings, the accessors of a property and any graphical member of a POU stay exactly as they were. Objects in the project that have no `.st` file on disk are listed in the report and left alone; delete them in CODESYS if they are gone from the source. A file that cannot be applied - its kind clashes with the project (a `TYPE` where the project holds a POU), its parent POU does not exist, or the project object is graphical - is reported as **Failed** and the rest of the import carries on.
+Line endings, a byte order mark and blank lines at the start or end of a file are not differences. Nothing is removed and recreated, so object GUIDs, network variable list settings, the accessors of a property and any graphical member of a POU stay exactly as they were. If a device's export folder holds no `.st` file at all while the project still has tracked objects, the import refuses rather than empty the project, as that is almost always the wrong folder. A file that cannot be applied - its kind clashes with the project (a `TYPE` where the project holds a POU), its parent POU does not exist, or the project object is graphical - is reported as **Failed** and the rest of the import carries on.
 
-When it finishes, a dialog shows a short report (added, updated, unchanged, not on disk, failed; long lists are cut off) and the full report is printed to the message view. If anything failed, the dialog is an error and the script fails after it.
+When it finishes, a dialog shows a short report (added, updated, removed, unchanged, failed; long lists are cut off) and the full report is printed to the message view. If anything failed, the dialog is an error and the script fails after it.
 
 ### Templates
 

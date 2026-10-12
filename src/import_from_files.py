@@ -130,6 +130,19 @@ def import_st_only(project, src_folder):
             )
         assert_path_exists(folder)
 
+        # An export folder with no .st file at all would remove every tracked
+        # object from the project, and is almost always the wrong folder (an
+        # empty checkout, a mistyped project name). Refuse rather than empty
+        # the project; a project with nothing to remove goes through.
+        if st_sync.has_tracked_objects(application) and not st_sync.folder_has_st_files(folder):
+            raise ValueError(
+                "No .st file found under "
+                + folder
+                + ", so importing it would remove every POU, DUT and GVL from the project. Nothing was changed."
+                + " Export To Files writes the folder; if the project really has no structured text left,"
+                + " delete the objects in CODESYS."
+            )
+
         # The device name only disambiguates when there is more than one.
         label_prefix = device_obj.get_name() + "/" if len(devices) > 1 else ""
         st_sync.sync_directory(folder, application, label_prefix, report)
