@@ -367,7 +367,7 @@ try:
     # --- line endings, a BOM and trailing blank lines are not changes --------------
     write(
         os.path.join(export_folder, "FB_Motor.st"),
-        "﻿FUNCTION_BLOCK FB_Motor\r\nVAR\r\n\tx : INT;\r\nEND_VAR\r\n\r\n"
+        "\ufeffFUNCTION_BLOCK FB_Motor\r\nVAR\r\n\tx : INT;\r\nEND_VAR\r\n\r\n"
         + st_files.IMPLEMENTATION_DELIMITER
         + "\r\n\r\nx := x + 1;\r\n\r\n\r\n",
     )

@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fail on non-ASCII bytes in src/*.py
+      - name: Fail on non-ASCII bytes in src/ and tools/ Python files
         run: python3 tools/ci/check_ascii.py
       - name: Compile src files with Python 3
         run: python3 tools/ci/compile_python3.py

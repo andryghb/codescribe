@@ -103,7 +103,7 @@ check_raises(
 
 check("CRLF is not a change", st_files.same_text("a\r\nb\r\n", "a\nb"))
 check("trailing whitespace at the end is not a change", st_files.same_text("a\nb\n\n\t ", "a\nb"))
-check("a BOM is not a change", st_files.same_text("﻿a\nb", "a\nb"))
+check("a BOM is not a change", st_files.same_text("\ufeffa\nb", "a\nb"))
 check("None reads as empty", st_files.same_text(None, "  \n"))
 check("content is a change", not st_files.same_text("a\nb", "a\nc"))
 check("whitespace inside is a change", not st_files.same_text("a\n\nb", "a\nb"))
