@@ -67,6 +67,14 @@ check_raises("member suffix without a parent", st_files.classify_file_name, "Res
 check_raises("empty name", st_files.classify_file_name, ".st")
 
 check_equal("export and import agree on the method name", st_files.method_file_name("A", "B"), "A.B.st")
+
+check_equal("one device exports into the folder itself", st_files.device_export_folder("root", "PLC", True), "root")
+check_equal(
+    "several devices export into a folder each",
+    st_files.device_export_folder("root", "PLC", False),
+    os.path.join("root", "PLC"),
+)
+check_equal("import of the flat layout", st_files.device_import_folder("nowhere", "PLC", True), ("nowhere", False))
 check_equal("visualisation name", st_files.visualisation_file_name("Visu"), "Visu.vis.xml")
 
 # --- POU or DUT -------------------------------------------------------------
