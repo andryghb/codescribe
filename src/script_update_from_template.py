@@ -19,6 +19,7 @@ def get_newest_template_path(template_paths, template_versions):
     return newest_path
 
 
+report = None
 try:
     print_python_version()
     assert_project_open()
@@ -41,15 +42,21 @@ try:
         shutil.copyfile(newest_template_path, project_path)
         scriptengine.projects.open(project_path)
 
-        import_from_files(scriptengine.projects.primary)
+        report = import_from_files(scriptengine.projects.primary)
 
         scriptengine.projects.primary.save()
-        ui_info("Update From Template complete.")
+        if report is None:
+            ui_info("Update From Template complete.")
+        else:
+            report.show_dialog("Update From Template")
     else:
         print("Update cancelled.")
 except Exception as e:
     print(e)
     ui_error_with_traceback("Update From Template failed!")
     raise e
+
+if report is not None and report.has_failures():
+    raise ValueError(str(len(report.failed)) + " file(s) could not be imported; see the message view")
 
 print("Done!")

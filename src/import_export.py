@@ -6,11 +6,9 @@ import scriptengine  # type: ignore
 
 from graphical_export import write_rendered_text
 from object_type import ObjectType, get_object_type
+from st_files import IMPLEMENTATION_DELIMITER as IMPLEMENTATION_DELIMITER_SPLIT
+from st_files import IMPLEMENTATION_DELIMITER_INSERT
 from util import *
-
-# unicode literals so they can be written to / split out of the UTF-8 text streams below
-IMPLEMENTATION_DELIMITER_SPLIT = u"// --- BEGIN IMPLEMENTATION ---"
-IMPLEMENTATION_DELIMITER_INSERT = u"\n" + IMPLEMENTATION_DELIMITER_SPLIT + u"\n\n"
 
 
 def write_st(obj, f):

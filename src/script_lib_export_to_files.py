@@ -8,7 +8,9 @@ import scriptengine  # type: ignore
 from entrypoint import get_src_folder
 import graphical_export
 from import_export import OBJECT_TYPE_TO_EXPORT_FUNCTION, SERVICE_EXPORT_FUNCTIONS, write_native
+from mode import is_st_only
 from object_type import ObjectType, get_object_type
+from st_export import StExporter
 from util import *
 
 # Service objects that are not source. The manager objects carry GUIDs that are not in
@@ -84,31 +86,47 @@ try:
                 + " Export Lib To Files only exports objects directly under the project root."
             )
 
+    st_only = is_st_only(scriptengine.projects.primary)
+    print("Mode: " + ("st-only" if st_only else "full"))
+
     staging_folder = begin_export_folder(src_folder)
 
-    for child_obj in scriptengine.projects.primary.get_children():
-        if child_obj.get_name() in SKIP_NAMES:
-            continue
+    summary = ""
+    if st_only:
+        exporter = StExporter()
+        for child_obj in scriptengine.projects.primary.get_children():
+            if child_obj.get_name() in SKIP_NAMES:
+                continue
+            # None as parent_obj is safe at the top level: only the members of
+            # a POU use it, and those are reached through their POU.
+            exporter.export_child(child_obj, None, staging_folder)
+        finalize_export_folder(src_folder, staging_folder)
+        summary = "\n\n" + exporter.stats.summary()
+        print(exporter.stats.summary())
+    else:
+        for child_obj in scriptengine.projects.primary.get_children():
+            if child_obj.get_name() in SKIP_NAMES:
+                continue
 
-        child_obj_type = get_object_type(child_obj)
-        if child_obj_type != ObjectType.UNKNOWN and child_obj_type not in OBJECT_TYPE_TO_EXPORT_FUNCTION:
-            continue
+            child_obj_type = get_object_type(child_obj)
+            if child_obj_type != ObjectType.UNKNOWN and child_obj_type not in OBJECT_TYPE_TO_EXPORT_FUNCTION:
+                continue
 
-        # Passing None as parent_obj is safe at the top level: the export functions
-        # that use parent_obj.get_name() (METHOD, PROPERTY, ACTION, TRANSITION) only
-        # apply to children of POUs, and export_pou passes the POU as the parent when
-        # recursing into them.
-        export_child(child_obj, None, staging_folder)
+            # Passing None as parent_obj is safe at the top level: the export functions
+            # that use parent_obj.get_name() (METHOD, PROPERTY, ACTION, TRANSITION) only
+            # apply to children of POUs, and export_pou passes the POU as the parent when
+            # recursing into them.
+            export_child(child_obj, None, staging_folder)
 
-    finalize_export_folder(src_folder, staging_folder)
+        finalize_export_folder(src_folder, staging_folder)
 
-    rendering_summary = graphical_export.summary()
-    if rendering_summary is not None:
-        print(rendering_summary)
+        rendering_summary = graphical_export.summary()
+        if rendering_summary is not None:
+            print(rendering_summary)
 except Exception as e:
     print(e)
     ui_error_with_traceback("Export Lib To Files failed.")
     raise e
 
 print("Done!")
-ui_info("Export Lib To Files complete.\n\nWrote: " + src_folder)
+ui_info("Export Lib To Files complete.\n\nWrote: " + src_folder + summary)

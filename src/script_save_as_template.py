@@ -10,7 +10,9 @@ from communication_import_export import remove_tracked_communication_devices
 from device_tree_import_export import remove_tracked_device_tree_devices
 from entrypoint import find_application, find_communication, get_device_entrypoints, get_src_folder
 from import_export import *
+from mode import is_st_only
 from project_template import find_template_paths_and_versions, generate_template_path
+import st_sync
 from util import *
 
 
@@ -46,9 +48,20 @@ try:
     scriptengine.projects.open(new_template_path, primary=False)
 
     template_project = scriptengine.projects.get_by_path(new_template_path)
+    st_only = is_st_only(scriptengine.projects.primary)
+    print("Mode: " + ("st-only" if st_only else "full"))
 
     for device_obj in get_device_entrypoints(template_project):
         application = find_application(device_obj)
+
+        if st_only:
+            # Only what the ST-only import recreates leaves the template. The
+            # devices, communication, task configuration and graphical POUs
+            # stay in it, as the import never touches them.
+            for name in st_sync.remove_tracked_objects(application.get_children()):
+                print("Removing " + name)
+            continue
+
         remove_tracked_objects(application.get_children())
         communication = find_communication(device_obj)
         if communication is not None:

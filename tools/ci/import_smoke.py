@@ -26,6 +26,11 @@ MODULES = [
     "device_tree_import_export",
     "import_from_files",
     "project_template",
+    # ST-only mode.
+    "st_files",
+    "mode",
+    "st_export",
+    "st_sync",
     # Renderers for graphical POUs. No scriptengine dependency of their own,
     # but they have to load under IronPython 2.7 like everything else here.
     "charset",
