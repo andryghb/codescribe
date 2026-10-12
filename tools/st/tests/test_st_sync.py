@@ -125,6 +125,7 @@ class FakeObject(object):
         return prop
 
     def export_native(self, destination, recursive=False):
+        self.exported_recursive = recursive
         with io.open(destination, "w", encoding="utf-8") as f:
             # Indented like a real native export; write_native's regex expects it.
             f.write('  <Single Name="Timestamp" Type="long">1234</Single>\n  <Visu name="' + self._name + '"/>\n')
@@ -237,6 +238,7 @@ EXPECTED_FILES = [
     "LD_Main.Step.st",
     "PersistentVars.gvl.st",
     "ST_Point.st",
+    "TaskConfig.xml",
     "Utils/F_Add.st",
     "Visu.vis.xml",
 ]
@@ -247,18 +249,22 @@ try:
     export_folder = os.path.join(work, "export")
     os.mkdir(export_folder)
     exporter = st_export.StExporter()
-    exporter.export_children(build_application(), export_folder)
+    source_app = build_application()
+    exporter.export_children(source_app, export_folder)
 
     check_equal(
         "export writes the .st files and the visualisation, nothing else", list_files(export_folder), EXPECTED_FILES
     )
     check_equal("export counts .st files", exporter.stats.st_files, 11)
     check_equal("export counts visualisations", exporter.stats.visualisations, 1)
+    check_equal("export counts task configurations", exporter.stats.task_configurations, 1)
+    check("task configuration is exported with its tasks", find(source_app, "TaskConfig").exported_recursive is True)
+    check("visualisation is exported alone", find(source_app, "Visu").exported_recursive is False)
     check_equal("export names what has no ST body", exporter.stats.graphical, ["LD_Main", "FB_Mixed.Act"])
     check_equal(
         "export names what is not ST",
         exporter.stats.other,
-        [("TaskConfig", ObjectType.TASK_CONFIGURATION), ("Library Manager", ObjectType.LIBRARY_MANAGER)],
+        [("Library Manager", ObjectType.LIBRARY_MANAGER)],
     )
     check_equal(
         "POU file is declaration, delimiter, implementation",
@@ -282,7 +288,7 @@ try:
         '<Single Name="Timestamp" Type="long">0</Single>' in read(os.path.join(export_folder, "Visu.vis.xml")),
     )
     summary = exporter.stats.summary()
-    check("summary counts", "Wrote 11 .st file(s) and 1 visualisation(s)." in summary, summary)
+    check("summary counts", "Wrote 11 .st file(s), 1 visualisation(s) and 1 task configuration(s)." in summary, summary)
     check("summary names the graphical POU", "LD_Main" in summary, summary)
 
     # --- import into a template: everything is added ---------------------------
@@ -311,7 +317,7 @@ try:
     )
     check_equal("fresh import: the ST POU in the template is unchanged", report.unchanged, ["FB_Mixed.st"])
     check_equal("fresh import updates nothing", report.updated, [])
-    check_equal("fresh import ignores the visualisation xml", report.ignored, ["Visu.vis.xml"])
+    check_equal("fresh import ignores the xml", report.ignored, ["TaskConfig.xml", "Visu.vis.xml"])
     check_equal("fresh import reports nothing missing", report.not_on_disk, [])
     check_equal("fresh import has no failures", report.failed, [])
     check_equal("imported POU implementation", find(app, "FB_Motor").textual_implementation.text, "x := x + 1;\n")

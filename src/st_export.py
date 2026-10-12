@@ -2,10 +2,12 @@
 """ST-only export: the structured text of an application as .st files.
 
 Only objects with a textual body are written - POUs, methods, actions,
-transitions, properties, DUTs and GVLs - plus visualisations as .vis.xml.
-Everything else (graphical POUs, task configuration, EVCs, managers, unmapped
-objects) is left to the project template and listed in the summary so the
-export never drops something silently.
+transitions, properties, DUTs and GVLs - plus two export-only xml files the
+import never reads: visualisations as .vis.xml and the task configuration as
+<name>.xml, so both can be reviewed in git while the project template keeps
+the real objects. Everything else (graphical POUs, EVCs, managers, unmapped
+objects) is left to the template and listed in the summary so the export
+never drops something silently.
 """
 from __future__ import print_function
 
@@ -54,11 +56,20 @@ class ExportStats(object):
     def __init__(self):
         self.st_files = 0
         self.visualisations = 0
+        self.task_configurations = 0
         self.graphical = []  # objects with no textual body
         self.other = []  # (name, type) of objects that are not structured text
 
     def summary(self):
-        lines = ["Wrote " + str(self.st_files) + " .st file(s) and " + str(self.visualisations) + " visualisation(s)."]
+        lines = [
+            "Wrote "
+            + str(self.st_files)
+            + " .st file(s), "
+            + str(self.visualisations)
+            + " visualisation(s) and "
+            + str(self.task_configurations)
+            + " task configuration(s)."
+        ]
         if self.graphical:
             lines.append("Not exported, no ST body (graphical): " + _joined(self.graphical))
         if self.other:
@@ -136,10 +147,18 @@ class StExporter(object):
             return
 
         if obj_type == ObjectType.VISUALISATION:
-            # The one xml the ST-only export keeps: visualisations have no
-            # textual form. Export-only; the import never reads it.
+            # Export-only xml: visualisations have no textual form. The import
+            # never reads it; the template carries the real object.
             write_native(child_obj, os.path.join(folder, st_files.visualisation_file_name(name)), recursive=False)
             self.stats.visualisations += 1
+            return
+
+        if obj_type == ObjectType.TASK_CONFIGURATION:
+            # Export-only xml as well, named as full mode names it so a mode
+            # switch does not rename the file in git. Recursive: the tasks
+            # are children of the configuration object.
+            write_native(child_obj, os.path.join(folder, st_files.task_configuration_file_name(name)), recursive=True)
+            self.stats.task_configurations += 1
             return
 
         member_types = (

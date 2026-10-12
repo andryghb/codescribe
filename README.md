@@ -64,13 +64,14 @@ The `GraphicalTesting` sample in this repository keeps a `codescribe.json` set t
 - Properties as `<pou>.<name>.property.st`: the property declaration, then one section per accessor headed `// --- BEGIN Get ---` or `// --- BEGIN Set ---`, each a declaration and implementation like a method
 - DUTs as `<name>.st`
 - GVLs, including persistent variable lists, as `<name>.gvl.st` (declaration only, no xml)
-- Visualisations as `<name>.vis.xml` - the one xml this mode keeps, so the HMI is reviewable. It is export-only: the import never reads it, and the project template carries the real object
+- Visualisations as `<name>.vis.xml`, so the HMI is reviewable. Export-only: the import never reads it, and the project template carries the real object
+- The task configuration as `<name>.xml` (the name full mode uses, so switching modes does not rename it), with its tasks, so cycle times and the programs they call are reviewable. Export-only as well: the import ignores it and the template carries the real object
 
-Nothing else is written: no `devices` or `communication` folders, no task configuration, no GVL or EVC xml, no library list, no visualisation manager, no graphical POU xml and no `.txt` renderings. The import also reads the `<device>/application` layout of earlier exports and of full mode, so a checkout made before this layout imports as it is; the next export rewrites it. A ladder, FBD, CFC or SFC POU is skipped, but its structured text methods and actions are still written beside where its file would be. The export dialog counts the files written and names every object it skipped.
+Nothing else is written: no `devices` or `communication` folders, no GVL or EVC xml, no library list, no visualisation manager, no graphical POU xml and no `.txt` renderings. The import also reads the `<device>/application` layout of earlier exports and of full mode, so a checkout made before this layout imports as it is; the next export rewrites it. A ladder, FBD, CFC or SFC POU is skipped, but its structured text methods and actions are still written beside where its file would be. The export dialog counts the files written and names every object it skipped.
 
 ### What the import does
 
-`Import From Files` reads only `.st` files and ignores everything else, the `.vis.xml` included. Each file is compared with the object it describes:
+`Import From Files` reads only `.st` files and ignores everything else, the visualisation and task configuration xml included. Each file is compared with the object it describes:
 
 - the object is missing: it is created and the text applied (**Added**)
 - the object exists but its declaration or implementation differs: the differing text is replaced in place (**Updated**)
@@ -88,7 +89,7 @@ When it finishes, a dialog shows a short report (added, updated, unchanged, not 
 
 The project template carries all of this, and a change to it is not seen in git:
 
-- Task configuration (cycle times, which programs run)
+- Task configuration changes: the xml is exported so they show in a diff, but they are never imported - make them in CODESYS and carry them in the template
 - Graphical POUs, actions, methods and properties (LD, FBD, CFC, SFC)
 - Interfaces (not exported in either mode yet)
 - Devices, communication, EVCs, text lists, image pools and the manager objects
