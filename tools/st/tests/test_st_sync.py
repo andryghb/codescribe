@@ -23,6 +23,7 @@ REPO = os.path.join(HERE, "..", "..", "..")
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, os.path.join(REPO, "tools", "ci"))  # stubbed scriptengine
 
+import import_from_files  # noqa: E402
 from object_type import GUID_TYPE_MAPPING, ObjectType  # noqa: E402
 import st_export  # noqa: E402
 import st_files  # noqa: E402
@@ -80,7 +81,11 @@ class FakeObject(object):
         return list(self.children)
 
     def find(self, name, recursive=False):
-        return [c for c in self.children if c._name == name]
+        found = [c for c in self.children if c._name == name]
+        if recursive:
+            for child in self.children:
+                found.extend(child.find(name, recursive=True))
+        return found
 
     def add(self, child):
         child.parent = self
@@ -162,6 +167,15 @@ def build_application():
     app.add(FakeObject("TaskConfig", ObjectType.TASK_CONFIGURATION))
     app.add(FakeObject("Library Manager", ObjectType.LIBRARY_MANAGER))
     return app
+
+
+def build_project(applications):
+    """A project with one device per (device name, application) given."""
+    project = FakeObject("Project", ObjectType.UNKNOWN)
+    for device_name, application in applications:
+        device = project.add(FakeObject(device_name, ObjectType.DEVICE))
+        device.add(application)
+    return project
 
 
 def build_template_application():
@@ -527,6 +541,61 @@ try:
         [c.get_name() for c in find(app, "FB_Mixed").get_children()],
         ["Act"],
     )
+
+    # --- the export folder holds the application's contents directly ------------------------
+    flat_folder = os.path.join(work, "flat")
+    os.mkdir(flat_folder)
+    stats = st_export.export_project(build_project([("CODESYS_SoftPLC", build_application())]), flat_folder)
+    check_equal("one device: the application's contents are the export folder", list_files(flat_folder), EXPECTED_FILES)
+    check_equal("one device: the stats come back", stats.st_files, 11)
+
+    project = build_project([("CODESYS_SoftPLC", build_template_application())])
+    report = import_from_files.import_st_only(project, flat_folder)
+    app = find(project, "CODESYS_SoftPLC", "Application")
+    check("one device: import reads the flat layout", "FB_Motor.st" in report.added, repr(report.failed))
+    check(
+        "one device: labels carry no device prefix",
+        all("/" not in label or label.startswith("Utils/") for label in report.added),
+        repr(report.added),
+    )
+    check_equal("one device: nothing failed", report.failed, [])
+
+    # --- the previous <device>/application layout still imports ------------------------------
+    legacy_folder = os.path.join(work, "legacy")
+    os.makedirs(os.path.join(legacy_folder, "CODESYS_SoftPLC", "application"))
+    st_export.StExporter().export_children(
+        build_application(), os.path.join(legacy_folder, "CODESYS_SoftPLC", "application")
+    )
+    project = build_project([("CODESYS_SoftPLC", build_template_application())])
+    report = import_from_files.import_st_only(project, legacy_folder)
+    app = find(project, "CODESYS_SoftPLC", "Application")
+    check("legacy layout: import reads <device>/application", "FB_Motor.st" in report.added, repr(report.failed))
+    check_equal("legacy layout: no folder named after the device is created", app.find("CODESYS_SoftPLC"), [])
+    check_equal("legacy layout: nothing failed", report.failed, [])
+
+    # --- several devices get a folder each ------------------------------------------------------
+    multi_folder = os.path.join(work, "multi")
+    os.mkdir(multi_folder)
+    project = build_project([("SafetyPLC", build_application()), ("StandardPLC", build_application())])
+    st_export.export_project(project, multi_folder)
+    check_equal(
+        "two devices: one folder per device, no application level",
+        list_files(multi_folder),
+        sorted(["SafetyPLC/" + f for f in EXPECTED_FILES] + ["StandardPLC/" + f for f in EXPECTED_FILES]),
+    )
+    project = build_project(
+        [("SafetyPLC", build_template_application()), ("StandardPLC", build_template_application())]
+    )
+    report = import_from_files.import_st_only(project, multi_folder)
+    check(
+        "two devices: labels carry the device name", "StandardPLC/FB_Motor.st" in report.added, repr(report.added[:5])
+    )
+    check(
+        "two devices: both applications filled",
+        find(project, "SafetyPLC", "Application").find("FB_Motor") != []
+        and find(project, "StandardPLC", "Application").find("FB_Motor") != [],
+    )
+    check_equal("two devices: nothing failed", report.failed, [])
 
     # --- a folder that holds something untracked stays --------------------------------------
     app = FakeObject("Application", ObjectType.UNKNOWN)

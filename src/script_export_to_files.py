@@ -12,7 +12,7 @@ import graphical_export
 from import_export import OBJECT_TYPE_TO_EXPORT_FUNCTION, SERVICE_EXPORT_FUNCTIONS, write_native
 from mode import is_st_only
 from object_type import ObjectType, get_object_type
-from st_export import StExporter
+from st_export import export_project
 from util import *
 
 
@@ -68,22 +68,6 @@ def export_full(project, staging_folder):
         export_device_tree_siblings(device_obj, device_folder, application, communication)
 
 
-def export_st_only(project, staging_folder):
-    # Each device's application folder and nothing else: no devices, no
-    # communication, no native xml beyond the visualisations.
-    exporter = StExporter()
-    for device_obj in get_device_entrypoints(project):
-        device_folder = os.path.join(staging_folder, device_obj.get_name())
-        os.mkdir(device_folder)
-
-        application = find_application(device_obj)
-        application_folder = os.path.join(device_folder, "application")
-        os.mkdir(application_folder)
-
-        exporter.export_children(application, application_folder)
-    return exporter.stats
-
-
 try:
     print_python_version()
     assert_project_open()
@@ -98,7 +82,7 @@ try:
 
     summary = ""
     if st_only:
-        stats = export_st_only(scriptengine.projects.primary, staging_folder)
+        stats = export_project(scriptengine.projects.primary, staging_folder)
         finalize_export_folder(src_folder, staging_folder)
         summary = "\n\n" + stats.summary()
         print(stats.summary())

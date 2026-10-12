@@ -11,6 +11,7 @@ from __future__ import print_function
 
 import os
 
+from entrypoint import find_application, get_device_entrypoints
 from import_export import write_native, write_st
 from object_type import ObjectType, get_object_type
 import st_files
@@ -70,6 +71,25 @@ def _joined(names):
     if len(names) > MAX_SUMMARY_NAMES:
         shown += ", ... and " + str(len(names) - MAX_SUMMARY_NAMES) + " more (see the message view)"
     return shown
+
+
+def export_project(project, staging_folder):
+    """Write every device's application into staging_folder; returns the ExportStats.
+
+    One device: its application's contents go straight into the folder. More
+    than one: a folder per device (see st_files.device_export_folder). Nothing
+    else is written - no devices, no communication, no native xml beyond the
+    visualisations.
+    """
+    exporter = StExporter()
+    devices = list(get_device_entrypoints(project))
+    for device_obj in devices:
+        application = find_application(device_obj)
+        folder = st_files.device_export_folder(staging_folder, device_obj.get_name(), len(devices) == 1)
+        if folder != staging_folder:
+            os.mkdir(folder)
+        exporter.export_children(application, folder)
+    return exporter.stats
 
 
 class StExporter(object):

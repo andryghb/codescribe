@@ -5,6 +5,7 @@ from device_tree_import_export import import_device_tree_siblings
 from entrypoint import find_application, find_communication, get_device_entrypoints, get_src_folder
 from import_export import *
 from mode import is_st_only
+import st_files
 import st_sync
 from util import *
 
@@ -112,19 +113,24 @@ def import_from_files(project):
 
 
 def import_st_only(project, src_folder):
-    # Only the application folders are read. Devices, communication and every
+    # Only the applications are read, from where the ST-only export writes
+    # them (st_files.device_import_folder). Devices, communication and every
     # non-.st file are the template's business in this mode.
     report = st_sync.SyncReport()
     devices = list(get_device_entrypoints(project))
     for device_obj in devices:
-        device_folder = os.path.join(src_folder, device_obj.get_name())
-        assert_path_exists(device_folder)
-
         application = find_application(device_obj)
-        application_folder = os.path.join(device_folder, "application")
-        assert_path_exists(application_folder)
+        folder, legacy = st_files.device_import_folder(src_folder, device_obj.get_name(), len(devices) == 1)
+        if legacy:
+            print(
+                "Reading "
+                + folder
+                + " (the <device>/application layout of earlier exports);"
+                + " the next export writes the application's contents directly into the export folder."
+            )
+        assert_path_exists(folder)
 
         # The device name only disambiguates when there is more than one.
         label_prefix = device_obj.get_name() + "/" if len(devices) > 1 else ""
-        st_sync.sync_directory(application_folder, application, label_prefix, report)
+        st_sync.sync_directory(folder, application, label_prefix, report)
     return report

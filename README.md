@@ -56,7 +56,7 @@ The `GraphicalTesting` sample in this repository keeps a `codescribe.json` set t
 
 ### What gets exported
 
-`Export To Files` walks each device's `application` folder and its subfolders, and writes:
+`Export To Files` writes the contents of the device's `application` folder straight into the export folder (`<project_name>/`, next to the `.project`), with no `<device>/application` levels in between. A project with more than one device gets one folder per device instead, as two applications cannot share a folder. The export holds:
 
 - Folders
 - POUs with a textual implementation, as `<name>.st` (declaration, then `// --- BEGIN IMPLEMENTATION ---`, then implementation)
@@ -66,7 +66,7 @@ The `GraphicalTesting` sample in this repository keeps a `codescribe.json` set t
 - GVLs, including persistent variable lists, as `<name>.gvl.st` (declaration only, no xml)
 - Visualisations as `<name>.vis.xml` - the one xml this mode keeps, so the HMI is reviewable. It is export-only: the import never reads it, and the project template carries the real object
 
-Nothing else is written: no `devices` or `communication` folders, no task configuration, no GVL or EVC xml, no library list, no visualisation manager, no graphical POU xml and no `.txt` renderings. A ladder, FBD, CFC or SFC POU is skipped, but its structured text methods and actions are still written beside where its file would be. The export dialog counts the files written and names every object it skipped.
+Nothing else is written: no `devices` or `communication` folders, no task configuration, no GVL or EVC xml, no library list, no visualisation manager, no graphical POU xml and no `.txt` renderings. The import also reads the `<device>/application` layout of earlier exports and of full mode, so a checkout made before this layout imports as it is; the next export rewrites it. A ladder, FBD, CFC or SFC POU is skipped, but its structured text methods and actions are still written beside where its file would be. The export dialog counts the files written and names every object it skipped.
 
 ### What the import does
 

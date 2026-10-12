@@ -8,6 +8,7 @@ under the IronPython that CODESYS embeds.
 """
 from __future__ import print_function
 
+import os
 import re
 
 ST_EXTENSION = ".st"
@@ -77,6 +78,34 @@ def visualisation_file_name(name):
 
 def is_st_file_name(file_name):
     return file_name.endswith(ST_EXTENSION)
+
+
+# ---------------------------------------------------------------------------
+# Where a device's application lives in the export folder
+# ---------------------------------------------------------------------------
+#
+# The ST-only export holds the application's contents directly: a project
+# with one device writes them into the export folder itself, one with several
+# devices writes one folder per device, as two applications cannot share a
+# folder. Earlier exports (and full mode) nest them under
+# <device>/application; the import still reads that layout, so a checkout
+# made before the change imports as it is and the next export rewrites it.
+
+LEGACY_APPLICATION_FOLDER = "application"
+
+
+def device_export_folder(root, device_name, single_device):
+    if single_device:
+        return root
+    return os.path.join(root, device_name)
+
+
+def device_import_folder(root, device_name, single_device):
+    """(folder holding the device's application, whether it is the legacy layout)"""
+    legacy = os.path.join(root, device_name, LEGACY_APPLICATION_FOLDER)
+    if os.path.isdir(legacy):
+        return legacy, True
+    return device_export_folder(root, device_name, single_device), False
 
 
 def classify_file_name(file_name):
