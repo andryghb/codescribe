@@ -12,6 +12,12 @@ from object_type import get_object_type
 EXPORT_STAGING_SUFFIX = ".codescribe_staging"
 EXPORT_BACKUP_SUFFIX = ".codescribe_backup"
 
+# Entries the export never removes from its folder, so an export folder that
+# is (or is linked into) a git checkout keeps the repository itself.
+KEPT_NAMES = (".git",)
+
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
 
 class ExportFolderLockedError(EnvironmentError):
     """The target export folder could not be replaced. The completed export is
@@ -34,8 +40,15 @@ def begin_export_folder(target_folder):
     return staging_folder
 
 
+def _is_kept(relative):
+    for part in relative.split(os.sep):
+        if part in KEPT_NAMES:
+            return True
+    return False
+
+
 def _remove_stale_files(staging_folder, target_folder):
-    """Delete target files this export did not write. Returns those that stay.
+    """Delete target files and directories this export did not write. Returns those that stay.
 
     The swap path replaces the folder wholesale, so anything the export did
     not produce is gone by definition. The sync path has to do the same, or a
@@ -43,18 +56,33 @@ def _remove_stale_files(staging_folder, target_folder):
     describes a POU that has since changed - with nothing to say so. Renaming
     a folder is what a lock stops; deleting a file inside it usually still
     works, and where it does not the file is named rather than left silent.
+    A directory the export did not write goes once it is empty: git keeps no
+    empty directory, but the import would read one as a folder. A .git entry
+    is never touched.
     """
     stale = []
-    for dir_path, _dir_names, file_names in os.walk(target_folder):
+    for dir_path, dir_names, file_names in os.walk(target_folder):
+        dir_names[:] = [name for name in dir_names if name not in KEPT_NAMES]
         relative = os.path.relpath(dir_path, target_folder)
         source = staging_folder if relative == "." else os.path.join(staging_folder, relative)
         for file_name in file_names:
-            if os.path.exists(os.path.join(source, file_name)):
+            if file_name in KEPT_NAMES or os.path.exists(os.path.join(source, file_name)):
                 continue
             try:
                 os.remove(os.path.join(dir_path, file_name))
             except (OSError, IOError):
                 stale.append(os.path.join(dir_path, file_name))
+
+    for dir_path, _dir_names, _file_names in os.walk(target_folder, topdown=False):
+        relative = os.path.relpath(dir_path, target_folder)
+        if relative == "." or _is_kept(relative) or os.path.isdir(os.path.join(staging_folder, relative)):
+            continue
+        if os.listdir(dir_path):
+            continue
+        try:
+            os.rmdir(dir_path)
+        except (OSError, IOError):
+            stale.append(dir_path)
     return stale
 
 
@@ -77,6 +105,50 @@ def _folder_has_files(folder):
     return False
 
 
+def _is_reparse_point(path):
+    """True for a directory junction (mklink /J) or a symbolic link.
+
+    os.path.islink knows nothing of junctions, and under IronPython nothing
+    of symbolic links either, so the .NET attributes are asked first; the
+    stdlib checks cover CPython, where the tests run.
+    """
+    try:
+        from System.IO import DirectoryInfo, FileAttributes
+        import clr  # noqa: F401  IronPython only
+
+        attributes = DirectoryInfo(path).Attributes
+        return (attributes & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint
+    except ImportError:
+        pass
+    except Exception as error:
+        print("Warning: could not read the attributes of " + path + ": " + str(error))
+    if os.path.islink(path):
+        return True
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except (OSError, IOError):
+        return False
+    return (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0
+
+
+def _sync_through(staging_folder, target_folder):
+    """Write the staged files into the existing target folder, in place. Returns the stale entries that stay."""
+    _sync_export_files(staging_folder, target_folder)
+    stale = _remove_stale_files(staging_folder, target_folder)
+    shutil.rmtree(staging_folder)
+    return stale
+
+
+def _warn_stale(stale):
+    if stale:
+        print(
+            "WARNING: "
+            + str(len(stale))
+            + " entr(y/ies) this export did not write could not be removed and are now stale: "
+            + ", ".join(stale[:6])
+        )
+
+
 def finalize_export_folder(target_folder, staging_folder):
     # An export that wrote no files must never replace the previous export:
     # swapping in an empty staging folder silently destroys it. Seen when
@@ -92,6 +164,27 @@ def finalize_export_folder(target_folder, staging_folder):
             + " needs a library project (objects directly under the project root)."
         )
 
+    if os.path.exists(target_folder) and _is_reparse_point(target_folder):
+        # A junction or symbolic link (mklink /J <project_name> <checkout>)
+        # points the export at a folder elsewhere, typically a git checkout.
+        # Renaming it would move the link rather than the contents, and
+        # deleting the old copy afterwards would follow the link into the
+        # checkout - so the export is written through the link instead.
+        try:
+            stale = _sync_through(staging_folder, target_folder)
+        except (OSError, IOError) as sync_error:
+            raise ExportFolderLockedError(
+                "Could not write through the link "
+                + target_folder
+                + ". The completed export is preserved in "
+                + staging_folder
+                + ". Original error: "
+                + str(sync_error)
+            )
+        print("Export folder " + target_folder + " is a link; synced the staged files through it.")
+        _warn_stale(stale)
+        return
+
     backup_folder = target_folder + EXPORT_BACKUP_SUFFIX
     try:
         if os.path.exists(target_folder):
@@ -103,9 +196,7 @@ def finalize_export_folder(target_folder, staging_folder):
         # On Windows these renames fail while another program holds a handle on
         # the target folder. Fall back to copying the staged files into it.
         try:
-            _sync_export_files(staging_folder, target_folder)
-            stale = _remove_stale_files(staging_folder, target_folder)
-            shutil.rmtree(staging_folder)
+            stale = _sync_through(staging_folder, target_folder)
         except (OSError, IOError):
             raise ExportFolderLockedError(
                 "Could not replace the export folder "
@@ -121,13 +212,7 @@ def finalize_export_folder(target_folder, staging_folder):
             + target_folder
             + " is in use; synced the staged files into it instead of swapping folders."
         )
-        if stale:
-            print(
-                "WARNING: "
-                + str(len(stale))
-                + " file(s) this export did not write could not be removed and are now stale: "
-                + ", ".join(stale[:6])
-            )
+        _warn_stale(stale)
         return
     try:
         if os.path.exists(backup_folder):

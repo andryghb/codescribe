@@ -844,6 +844,50 @@ finally:
     shutil.rmtree(workspace)
 
 
+# --- an export folder that is a link is written through, not replaced --------
+
+# mklink /J <project_name> <checkout> points the export into a git checkout.
+# The folder swap renamed the link aside and deleted the old copy through it,
+# which took the checkout's contents with it. Python 2.7 has no os.symlink on
+# Windows, so under IronPython this part is skipped; the junction detection
+# itself runs only inside CODESYS.
+if not hasattr(os, "symlink"):
+    print("SKIP    link tests: os.symlink is not available here")
+else:
+    workspace = tempfile.mkdtemp()
+    try:
+        linked = os.path.join(workspace, "checkout", "TR")
+        os.makedirs(os.path.join(linked, "Stale"))
+        os.makedirs(os.path.join(linked, ".git"))
+        for name in ("OLD.st", os.path.join(".git", "HEAD")):
+            handle = io.open(os.path.join(linked, name), "w", encoding="utf-8")
+            handle.write("before\n")
+            handle.close()
+        target = os.path.join(workspace, "Project")
+        os.symlink(linked, target)
+
+        staging = util.begin_export_folder(target)
+        os.makedirs(os.path.join(staging, "Sub"))
+        for name in ("NEW.st", os.path.join("Sub", "X.st")):
+            handle = io.open(os.path.join(staging, name), "w", encoding="utf-8")
+            handle.write("after\n")
+            handle.close()
+        util.finalize_export_folder(target, staging)
+
+        check("the link is still a link", os.path.islink(target))
+        check("the export landed in the linked folder", os.path.exists(os.path.join(linked, "NEW.st")))
+        check("a new subfolder landed too", os.path.exists(os.path.join(linked, "Sub", "X.st")))
+        check("a file the export did not write is removed", not os.path.exists(os.path.join(linked, "OLD.st")))
+        check(
+            "an empty directory the export did not write is removed", not os.path.isdir(os.path.join(linked, "Stale"))
+        )
+        check("the .git entry is kept", os.path.exists(os.path.join(linked, ".git", "HEAD")))
+        check("no backup folder was made from the link", not os.path.exists(target + util.EXPORT_BACKUP_SUFFIX))
+        check("the staging folder is cleaned up after the link sync", not os.path.exists(staging))
+    finally:
+        shutil.rmtree(workspace)
+
+
 # --- the importer ignores the derived file ---------------------------------
 
 # This is the contract that keeps the round trip intact. import_directory_child

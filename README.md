@@ -210,6 +210,8 @@ On import, each tracked device is removed and recreated from its exported xml. D
 
 If the target folder is locked (an open Explorer window, IDE, git client or antivirus) and cannot be swapped, the staged files are synced into it instead and the export still succeeds. If that also fails, the error dialog reports the staging folder path; the completed export is preserved there, so nothing is lost.
 
+If the export folder is a directory junction or symbolic link, for example `mklink /J <project_name> C:\repos\<repo>\<folder>` so that the export lands straight in a git checkout, the export writes through the link: the staged files are synced into the linked folder, files and empty directories the export did not write are removed from it, and the link itself stays in place. A `.git` entry inside the export folder is never removed, whichever path the export takes.
+
 ## Status
 
 CODESCRIBE has been tested only on CODESYS V3.5 SP11, using the project structure supplied by the IFM CR711s packages. Version 0.2.0 was validated end-to-end on V3.5 SP11 (32-bit) with an IFM CR711S compound (Standard + SIL2) project: export/import round-trip, code generation, simulation and a hardware download.
