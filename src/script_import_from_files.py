@@ -16,7 +16,8 @@ try:
         question = (
             "Import From Files will update the project from the .st files on disk."
             + " Objects whose file differs are overwritten, unexported changes included;"
-            + " objects whose file matches are left alone.\n\nDo you want to continue?"
+            + " objects whose file matches are left alone, and objects whose .st file is gone are removed."
+            + "\n\nDo you want to continue?"
         )
     else:
         question = (

@@ -318,7 +318,7 @@ try:
     check_equal("fresh import: the ST POU in the template is unchanged", report.unchanged, ["FB_Mixed.st"])
     check_equal("fresh import updates nothing", report.updated, [])
     check_equal("fresh import ignores the xml", report.ignored, ["TaskConfig.xml", "Visu.vis.xml"])
-    check_equal("fresh import reports nothing missing", report.not_on_disk, [])
+    check_equal("fresh import removes nothing", report.removed, [])
     check_equal("fresh import has no failures", report.failed, [])
     check_equal("imported POU implementation", find(app, "FB_Motor").textual_implementation.text, "x := x + 1;\n")
     check_equal(
@@ -395,17 +395,48 @@ try:
     st_sync.sync_directory(export_folder, app, "", report)
     check("CRLF, BOM and trailing newlines are not a change", "FB_Motor.st" in report.unchanged, repr(report.updated))
 
-    # --- an object with no file is reported, not removed ----------------------------
+    # --- an object whose file is gone is removed from the project -----------------------
     os.remove(os.path.join(export_folder, "GVL.gvl.st"))
     os.remove(os.path.join(export_folder, "FB_Motor.Start.st"))
     report = st_sync.SyncReport()
     st_sync.sync_directory(export_folder, app, "", report)
     check_equal(
-        "objects with no file are reported", sorted(report.not_on_disk), ["FB_Motor.Start (METHOD)", "GVL (GVL)"]
+        "objects whose file is gone are removed", sorted(report.removed), ["FB_Motor.Start (METHOD)", "GVL (GVL)"]
     )
-    check("the GVL is still in the project", not find(app, "GVL").removed)
-    check("the method is still in the project", not find(app, "FB_Motor", "Start").removed)
-    check("a graphical POU is never reported missing", "LD_Main (POU)" not in report.not_on_disk)
+    check_equal("the GVL is gone from the project", app.find("GVL"), [])
+    check_equal("the method is gone from the project", find(app, "FB_Motor").find("Start"), [])
+    check("the POU that lost a method stays", not find(app, "FB_Motor").removed)
+    check("a graphical POU is never removed", not find(app, "LD_Main").removed)
+    check("the task configuration is never removed", not find(app, "TaskConfig").removed)
+    check_equal("removal leaves the rest unchanged", report.failed, [])
+
+    # --- a member file left behind by a deleted POU fails, the POU goes -----------------
+    os.remove(os.path.join(export_folder, "FB_Mixed.st"))
+    report = st_sync.SyncReport()
+    st_sync.sync_directory(export_folder, app, "", report)
+    check_equal("deleted POU is removed with its members", report.removed, ["FB_Mixed (POU)"])
+    check_equal("the POU is gone", app.find("FB_Mixed"), [])
+    check(
+        "the member file left behind fails",
+        "FB_Mixed.Tick.st" in [label for label, _error in report.failed],
+        repr(report.failed),
+    )
+    check("the failure says the POU is missing", "not in the project" in report.failed[0][1], report.failed[0][1])
+    os.remove(os.path.join(export_folder, "FB_Mixed.Tick.st"))
+
+    # --- a folder with no directory loses its tracked objects, keeps the rest -----------
+    folder_obj = app.add(FakeObject("Diagrams", ObjectType.FOLDER))
+    folder_obj.add(FakeObject("LD_Only", ObjectType.POU, "PROGRAM LD_Only\n", None))
+    folder_obj.add(FakeObject("ST_Gone", ObjectType.POU, "PROGRAM ST_Gone\n", ";\n"))
+    report = st_sync.SyncReport()
+    st_sync.sync_directory(export_folder, app, "", report)
+    check_equal("the ST POU in the missing folder is removed", report.removed, ["Diagrams/ST_Gone (POU)"])
+    check("the folder holding a ladder POU stays", not folder_obj.removed)
+    folder_obj.find("LD_Only")[0].remove()
+    report = st_sync.SyncReport()
+    st_sync.sync_directory(export_folder, app, "", report)
+    check_equal("an emptied folder with no directory goes", report.removed, ["Diagrams/ (folder)"])
+    check("the folder is gone", folder_obj.removed)
 
     # --- a file whose kind clashes with the project fails, nothing is created -------
     write(
@@ -519,10 +550,10 @@ try:
     for i in range(12):
         report.added.append("Pou%d.st" % i)
     report.updated.append("X.st")
-    report.not_on_disk.append("Old (POU)")
+    report.removed.append("Old (POU)")
     summary = report.summary()
     check("summary caps long lists", "... and 4 more (see the message view)" in summary, summary)
-    check("summary lists what is not on disk", "Old (POU)" in summary, summary)
+    check("summary lists what was removed", "Old (POU)" in summary, summary)
     check("summary without failures has no failed line", "Failed" not in summary, summary)
     check("details list everything", "Pou11.st" in report.details())
 
@@ -602,6 +633,30 @@ try:
         and find(project, "StandardPLC", "Application").find("FB_Motor") != [],
     )
     check_equal("two devices: nothing failed", report.failed, [])
+
+    # --- an export folder with no .st file at all is refused, not applied ------------------
+    empty_folder = os.path.join(work, "empty")
+    os.mkdir(empty_folder)
+    project = build_project([("CODESYS_SoftPLC", build_application())])
+    try:
+        import_from_files.import_st_only(project, empty_folder)
+        check("a folder without .st files is refused", False, "no ValueError")
+    except ValueError as error:
+        check("a folder without .st files is refused", "would remove every POU" in str(error), str(error))
+    check(
+        "nothing was removed by the refused import",
+        not find(project, "CODESYS_SoftPLC", "Application", "FB_Motor").removed,
+    )
+    # The template application still holds FB_Mixed (kept for its ladder
+    # action), so only an application with nothing the export writes passes.
+    bare = FakeObject("Application", ObjectType.UNKNOWN)
+    bare.add(FakeObject("LD_Main", ObjectType.POU, "PROGRAM LD_Main\n", None))
+    bare.add(FakeObject("TaskConfig", ObjectType.TASK_CONFIGURATION))
+    project = build_project([("CODESYS_SoftPLC", bare)])
+    report = import_from_files.import_st_only(project, empty_folder)
+    check_equal(
+        "a project with nothing tracked imports an empty folder quietly", (report.removed, report.failed), ([], [])
+    )
 
     # --- a folder that holds something untracked stays --------------------------------------
     app = FakeObject("Application", ObjectType.UNKNOWN)

@@ -5,8 +5,10 @@ Unlike the full-mode import, nothing is removed and recreated wholesale. Each
 .st file is compared with the object it describes; an object whose text
 already matches is left alone, one that differs has its declaration and/or
 implementation replaced in place, and one that does not exist is created.
-Files that are not .st are ignored, and objects in the project with no file
-on disk are reported, not deleted.
+Files that are not .st are ignored. An object whose .st file is gone from
+disk is removed from the project, as a deletion in the source is a change
+like any other; what the export never writes (graphical POUs, the task
+configuration, visualisations) is never removed.
 
 Updating in place is what keeps everything the .st file does not carry -
 object GUIDs, network variable list settings, the accessors of a property,
@@ -39,7 +41,7 @@ class SyncReport(object):
         self.added = []
         self.updated = []
         self.unchanged = []
-        self.not_on_disk = []
+        self.removed = []
         self.failed = []  # (label, traceback text)
         self.ignored = []  # files that are not .st
 
@@ -66,9 +68,9 @@ class SyncReport(object):
         lines.append("Updated: " + str(len(self.updated)))
         lines.extend(_listed(self.updated, max_items))
         lines.append("Unchanged: " + str(len(self.unchanged)))
-        if self.not_on_disk:
-            lines.append("In the project but not on disk (left untouched): " + str(len(self.not_on_disk)))
-            lines.extend(_listed(self.not_on_disk, max_items))
+        if self.removed:
+            lines.append("Removed (no .st file on disk): " + str(len(self.removed)))
+            lines.extend(_listed(self.removed, max_items))
         if self.failed:
             lines.append("Failed: " + str(len(self.failed)))
             lines.extend(_listed([label + ": " + _last_line(error) for label, error in self.failed], max_items))
@@ -83,7 +85,7 @@ class SyncReport(object):
             ("Added", self.added),
             ("Updated", self.updated),
             ("Unchanged", self.unchanged),
-            ("In the project but not on disk (left untouched)", self.not_on_disk),
+            ("Removed (no .st file on disk)", self.removed),
             ("Ignored (not .st)", self.ignored),
         ):
             lines.append(title + ": " + str(len(items)))
@@ -126,6 +128,11 @@ def sync_directory(dir_path, parent_obj, label_prefix, report):
     # so the report reads the same on every run.
     entries = sorted(os.listdir(dir_path), key=lambda e: (e.count("."), e.lower()))
 
+    # What is gone from disk goes from the project first, so a member file
+    # left behind by a deleted POU is reported as having no POU rather than
+    # applied to one that is about to go.
+    _remove_missing(parent_obj, entries, label_prefix, report)
+
     for entry in entries:
         full_path = os.path.join(dir_path, entry)
         label = label_prefix + entry
@@ -151,8 +158,6 @@ def sync_directory(dir_path, parent_obj, label_prefix, report):
             report.fail(label, traceback.format_exc())
             continue
         report.record(status, label)
-
-    _report_not_on_disk(parent_obj, entries, label_prefix, report)
 
 
 def _sync_st_file(file_name, dir_path, parent_obj):
@@ -410,38 +415,88 @@ def member_file_name(pou_name, obj):
 
 
 def expected_entries(obj):
-    """[(directory entry the export writes, description)] for one object.
+    """[(directory entry the export writes, description, object that goes if it is missing)]
 
-    Members of a POU are included (they sit beside the POU's file), its
-    other descendants are not. An object the ST-only export skips yields
-    nothing, so a graphical POU is never reported as missing.
+    For one object: a folder yields its directory, a DUT or GVL its file, a
+    POU its own file (when textual) and one entry per tracked member, which
+    sit beside the POU's file. An object the ST-only export skips yields
+    nothing, so a graphical POU is never taken for missing.
     """
     obj_type = get_object_type(obj)
     name = obj.get_name()
     if obj_type == ObjectType.FOLDER:
-        return [(name, name + "/ (folder)")]
+        return [(name, name + "/ (folder)", obj)]
     if obj_type == ObjectType.DUT:
-        return [(st_files.dut_file_name(name), name + " (DUT)")]
+        return [(st_files.dut_file_name(name), name + " (DUT)", obj)]
     if obj_type in GVL_TYPES:
-        return [(st_files.gvl_file_name(name), name + " (GVL)")]
+        return [(st_files.gvl_file_name(name), name + " (GVL)", obj)]
     if obj_type != ObjectType.POU:
         return []
     entries = []
     if has_textual_implementation(obj):
-        entries.append((st_files.pou_file_name(name), name + " (POU)"))
+        entries.append((st_files.pou_file_name(name), name + " (POU)", obj))
     for member in obj.get_children():
         if is_tracked_member(member):
             member_type = get_object_type(member)
-            entries.append((member_file_name(name, member), name + "." + member.get_name() + " (" + member_type + ")"))
+            entries.append(
+                (member_file_name(name, member), name + "." + member.get_name() + " (" + member_type + ")", member)
+            )
     return entries
 
 
-def _report_not_on_disk(parent_obj, entries, label_prefix, report):
+def has_tracked_objects(container_obj):
+    """True when the ST-only export would write at least one file for the container's children."""
+    for obj in container_obj.get_children():
+        if get_object_type(obj) == ObjectType.FOLDER:
+            if has_tracked_objects(obj):
+                return True
+        elif expected_entries(obj):
+            return True
+    return False
+
+
+def folder_has_st_files(folder):
+    for _dir_path, _dir_names, file_names in os.walk(folder):
+        for file_name in file_names:
+            if st_files.is_st_file_name(file_name):
+                return True
+    return False
+
+
+def _remove_missing(parent_obj, entries, label_prefix, report):
+    """Remove the children of parent_obj whose file is not among entries.
+
+    A folder with no directory loses its tracked contents and goes once it is
+    empty - git keeps no empty directory, so a folder holding only a ladder
+    POU has none on disk and must stay. A POU whose own file is gone goes
+    with all of its members; a member whose file is gone goes alone.
+    """
     present = set(entries)
-    for obj in parent_obj.get_children():
-        for entry, description in expected_entries(obj):
-            if entry not in present:
-                report.not_on_disk.append(label_prefix + description)
+    for obj in list(parent_obj.get_children()):
+        if get_object_type(obj) == ObjectType.FOLDER:
+            name = obj.get_name()
+            if name in present:
+                continue
+            _remove_missing(obj, [], label_prefix + name + "/", report)
+            if len(obj.get_children()) == 0:
+                _remove(obj, label_prefix + name + "/ (folder)", report)
+            continue
+        for entry, description, target in expected_entries(obj):
+            if entry in present:
+                continue
+            _remove(target, label_prefix + description, report)
+            if target is obj:
+                break  # the POU went, and its members with it
+
+
+def _remove(obj, label, report):
+    try:
+        obj.remove()
+    except Exception:
+        report.fail(label, traceback.format_exc())
+        return
+    print("Removed " + label)
+    report.removed.append(label)
 
 
 def remove_tracked_objects(children):
