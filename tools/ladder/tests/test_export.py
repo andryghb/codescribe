@@ -844,6 +844,115 @@ finally:
     shutil.rmtree(workspace)
 
 
+# --- .md files in the export folder survive every export path ---------------
+
+# Notes kept beside the exported code (a README.md, per-folder docs) are
+# never written by the export, and the swap replaced the folder wholesale.
+
+
+def _write(path, text):
+    folder = os.path.dirname(path)
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    handle = io.open(path, "w", encoding="utf-8")
+    handle.write(text)
+    handle.close()
+
+
+def _read(path):
+    handle = io.open(path, "r", encoding="utf-8")
+    try:
+        return handle.read()
+    finally:
+        handle.close()
+
+
+def _md_target(workspace):
+    target = os.path.join(workspace, "Project")
+    _write(os.path.join(target, "README.md"), "root notes\n")
+    _write(os.path.join(target, "Motors", "NOTES.MD"), "upper-case extension\n")
+    _write(os.path.join(target, "Docs", "guide.md"), "a folder the export does not write\n")
+    _write(os.path.join(target, "OLD.st"), "PROGRAM Old\n")
+    return target
+
+
+def _md_staging(target):
+    staging = util.begin_export_folder(target)
+    _write(os.path.join(staging, "NEW.st"), "PROGRAM New\n")
+    _write(os.path.join(staging, "Motors", "FB_Motor.st"), "FUNCTION_BLOCK FB_Motor\n")
+    return staging
+
+
+def _check_md_kept(prefix, target):
+    check(prefix + ": the root .md is kept", _read(os.path.join(target, "README.md")) == "root notes\n")
+    check(prefix + ": a .md beside exported code is kept", os.path.exists(os.path.join(target, "Motors", "NOTES.MD")))
+    check(
+        prefix + ": a .md in a folder the export did not write is kept",
+        os.path.exists(os.path.join(target, "Docs", "guide.md")),
+    )
+    check(prefix + ": the export landed", os.path.exists(os.path.join(target, "Motors", "FB_Motor.st")))
+    check(prefix + ": a stale .st is still removed", not os.path.exists(os.path.join(target, "OLD.st")))
+
+
+workspace = tempfile.mkdtemp()
+try:
+    target = _md_target(workspace)
+    util.finalize_export_folder(target, _md_staging(target))
+    _check_md_kept("swap", target)
+    check("swap: no backup folder is left", not os.path.exists(target + util.EXPORT_BACKUP_SUFFIX))
+finally:
+    shutil.rmtree(workspace)
+
+workspace = tempfile.mkdtemp()
+try:
+    target = _md_target(workspace)
+    staging = _md_staging(target)
+    real_rename = os.rename
+
+    def locked_rename(source, destination):
+        if os.path.isdir(source):
+            raise OSError("folder is locked")
+        return real_rename(source, destination)
+
+    os.rename = locked_rename
+    try:
+        util.finalize_export_folder(target, staging)
+    finally:
+        os.rename = real_rename
+    _check_md_kept("locked", target)
+finally:
+    shutil.rmtree(workspace)
+
+workspace = tempfile.mkdtemp()
+try:
+    # .md files alone are not an export: an empty staging folder is still refused.
+    target = _md_target(workspace)
+    staging = util.begin_export_folder(target)
+    try:
+        util.finalize_export_folder(target, staging)
+        check("an empty export beside .md files is refused", False, "accepted")
+    except util.NothingExportedError:
+        check("an empty export beside .md files is refused", True)
+    check("the refused export leaves the .st in place", os.path.exists(os.path.join(target, "OLD.st")))
+finally:
+    shutil.rmtree(workspace)
+
+
+# --- an export folder that is itself a checkout keeps its .git ---------------
+
+# Not a link, just a folder holding .git: the swap would have deleted the
+# repository along with the old copy of the folder.
+workspace = tempfile.mkdtemp()
+try:
+    target = _md_target(workspace)
+    _write(os.path.join(target, ".git", "HEAD"), "ref: refs/heads/main\n")
+    util.finalize_export_folder(target, _md_staging(target))
+    check("checkout: the .git entry is kept", os.path.exists(os.path.join(target, ".git", "HEAD")))
+    _check_md_kept("checkout", target)
+finally:
+    shutil.rmtree(workspace)
+
+
 # --- an export folder that is a link is written through, not replaced --------
 
 # mklink /J <project_name> <checkout> points the export into a git checkout.
