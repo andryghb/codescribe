@@ -210,7 +210,9 @@ On import, each tracked device is removed and recreated from its exported xml. D
 
 If the target folder is locked (an open Explorer window, IDE, git client or antivirus) and cannot be swapped, the staged files are synced into it instead and the export still succeeds. If that also fails, the error dialog reports the staging folder path; the completed export is preserved there, so nothing is lost.
 
-If the export folder is a directory junction or symbolic link, for example `mklink /J <project_name> C:\repos\<repo>\<folder>` so that the export lands straight in a git checkout, the export writes through the link: the staged files are synced into the linked folder, files and empty directories the export did not write are removed from it, and the link itself stays in place. A `.git` entry inside the export folder is never removed, whichever path the export takes.
+If the export folder is a directory junction or symbolic link, for example `mklink /J <project_name> C:\repos\<repo>\<folder>` so that the export lands straight in a git checkout, the export writes through the link: the staged files are synced into the linked folder, files and empty directories the export did not write are removed from it, and the link itself stays in place. A `.git` entry inside the export folder is never removed, whichever path the export takes: an export folder that holds one is synced in place rather than swapped.
+
+`.md` files in the export folder and its subfolders are kept on every export, so notes can live beside the exported code. The export never writes or imports them. In `st-only` mode a directory holding only `.md` files is still read as a folder on import, so keep notes beside `.st` files or at the top of the export folder.
 
 ## Status
 

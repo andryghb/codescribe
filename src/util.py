@@ -16,6 +16,10 @@ EXPORT_BACKUP_SUFFIX = ".codescribe_backup"
 # is (or is linked into) a git checkout keeps the repository itself.
 KEPT_NAMES = (".git",)
 
+# Files the export never writes but keeps wherever they are in its folder:
+# notes kept beside the exported code (a README.md, per-folder docs).
+PRESERVED_EXTENSIONS = (".md",)
+
 FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
@@ -47,6 +51,36 @@ def _is_kept(relative):
     return False
 
 
+def _is_preserved_file(file_name):
+    return os.path.splitext(file_name)[1].lower() in PRESERVED_EXTENSIONS
+
+
+def _holds_kept_entries(folder):
+    for _dir_path, dir_names, file_names in os.walk(folder):
+        for name in dir_names + file_names:
+            if name in KEPT_NAMES:
+                return True
+    return False
+
+
+def _carry_preserved_files(target_folder, staging_folder):
+    """Copy the target's preserved files into the staging folder before the swap.
+
+    Copied, not moved, so they are still in the target if the swap fails and
+    the export falls back to syncing. A file the export wrote itself wins.
+    """
+    for dir_path, dir_names, file_names in os.walk(target_folder):
+        dir_names[:] = [name for name in dir_names if name not in KEPT_NAMES]
+        relative = os.path.relpath(dir_path, target_folder)
+        destination = staging_folder if relative == "." else os.path.join(staging_folder, relative)
+        for file_name in file_names:
+            if not _is_preserved_file(file_name) or os.path.exists(os.path.join(destination, file_name)):
+                continue
+            if not os.path.isdir(destination):
+                os.makedirs(destination)
+            shutil.copy2(os.path.join(dir_path, file_name), os.path.join(destination, file_name))
+
+
 def _remove_stale_files(staging_folder, target_folder):
     """Delete target files and directories this export did not write. Returns those that stay.
 
@@ -58,7 +92,7 @@ def _remove_stale_files(staging_folder, target_folder):
     works, and where it does not the file is named rather than left silent.
     A directory the export did not write goes once it is empty: git keeps no
     empty directory, but the import would read one as a folder. A .git entry
-    is never touched.
+    and the preserved files (.md) are never touched.
     """
     stale = []
     for dir_path, dir_names, file_names in os.walk(target_folder):
@@ -66,7 +100,9 @@ def _remove_stale_files(staging_folder, target_folder):
         relative = os.path.relpath(dir_path, target_folder)
         source = staging_folder if relative == "." else os.path.join(staging_folder, relative)
         for file_name in file_names:
-            if file_name in KEPT_NAMES or os.path.exists(os.path.join(source, file_name)):
+            if file_name in KEPT_NAMES or _is_preserved_file(file_name):
+                continue
+            if os.path.exists(os.path.join(source, file_name)):
                 continue
             try:
                 os.remove(os.path.join(dir_path, file_name))
@@ -164,26 +200,37 @@ def finalize_export_folder(target_folder, staging_folder):
             + " needs a library project (objects directly under the project root)."
         )
 
-    if os.path.exists(target_folder) and _is_reparse_point(target_folder):
+    is_link = os.path.exists(target_folder) and _is_reparse_point(target_folder)
+    if is_link or (os.path.exists(target_folder) and _holds_kept_entries(target_folder)):
         # A junction or symbolic link (mklink /J <project_name> <checkout>)
         # points the export at a folder elsewhere, typically a git checkout.
         # Renaming it would move the link rather than the contents, and
         # deleting the old copy afterwards would follow the link into the
-        # checkout - so the export is written through the link instead.
+        # checkout - so the export is written through the link instead. An
+        # export folder that is itself a checkout (it holds .git) is synced
+        # in place too: the swap would delete the repository with the old copy.
         try:
             stale = _sync_through(staging_folder, target_folder)
         except (OSError, IOError) as sync_error:
             raise ExportFolderLockedError(
-                "Could not write through the link "
+                "Could not write into "
                 + target_folder
                 + ". The completed export is preserved in "
                 + staging_folder
                 + ". Original error: "
                 + str(sync_error)
             )
-        print("Export folder " + target_folder + " is a link; synced the staged files through it.")
+        if is_link:
+            print("Export folder " + target_folder + " is a link; synced the staged files through it.")
+        else:
+            print("Export folder " + target_folder + " holds a .git entry; synced the staged files into it.")
         _warn_stale(stale)
         return
+
+    # Notes kept beside the code must survive the swap, which replaces the
+    # folder wholesale.
+    if os.path.exists(target_folder):
+        _carry_preserved_files(target_folder, staging_folder)
 
     backup_folder = target_folder + EXPORT_BACKUP_SUFFIX
     try:
