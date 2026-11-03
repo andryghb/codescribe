@@ -13,24 +13,19 @@ try:
     assert_project_open()
 
     if is_st_only(scriptengine.projects.primary):
-        question = (
-            "Import From Files will update the project from the .st files on disk."
-            + " Objects whose file differs are overwritten, unexported changes included;"
-            + " objects whose file matches are left alone, and objects whose .st file is gone are removed."
-            + "\n\nDo you want to continue?"
-        )
+        # No confirmation: the import only touches objects whose .st file
+        # differs or is gone, the report dialog afterwards lists every change,
+        # and an export folder with no .st file at all is refused outright.
+        ui_continue = scriptengine.PromptResult.Yes
     else:
-        question = (
-            "Import From Files will overwrite unexported changes in the current project!\n\nDo you want to continue?"
+        # Full mode removes and recreates every tracked object, so it still asks.
+        ui_continue = scriptengine.system.ui.prompt(
+            "Import From Files will overwrite unexported changes in the current project!\n\nDo you want to continue?",
+            choice=scriptengine.PromptChoice.YesNo,
+            default_result=scriptengine.PromptResult.No,
+            store_description="Don't show again",
+            store_key="import_from_files_confirm",
         )
-
-    ui_continue = scriptengine.system.ui.prompt(
-        question,
-        choice=scriptengine.PromptChoice.YesNo,
-        default_result=scriptengine.PromptResult.No,
-        store_description="Don't show again",
-        store_key="import_from_files_confirm",
-    )
 
     if ui_continue == scriptengine.PromptResult.Yes:
         report = import_from_files(scriptengine.projects.primary)

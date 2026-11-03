@@ -80,7 +80,7 @@ Nothing else is written: no `devices` or `communication` folders, no GVL or EVC 
 
 Line endings, a byte order mark and blank lines at the start or end of a file are not differences. Nothing is removed and recreated, so object GUIDs, network variable list settings, the accessors of a property and any graphical member of a POU stay exactly as they were. If a device's export folder holds no `.st` file at all while the project still has tracked objects, the import refuses rather than empty the project, as that is almost always the wrong folder. A file that cannot be applied - its kind clashes with the project (a `TYPE` where the project holds a POU), its parent POU does not exist, or the project object is graphical - is reported as **Failed** and the rest of the import carries on.
 
-When it finishes, a dialog shows a short report (added, updated, removed, unchanged, failed; long lists are cut off) and the full report is printed to the message view. If anything failed, the dialog is an error and the script fails after it.
+The import starts without asking for confirmation; full mode still asks, as it removes and recreates every tracked object. When it finishes, a dialog shows a short report (added, updated, removed, unchanged, failed; long lists are cut off) and the full report is printed to the message view. If anything failed, the dialog is an error and the script fails after it.
 
 ### Templates
 
