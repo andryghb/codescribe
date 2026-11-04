@@ -145,5 +145,6 @@ def import_st_only(project, src_folder):
 
         # The device name only disambiguates when there is more than one.
         label_prefix = device_obj.get_name() + "/" if len(devices) > 1 else ""
-        st_sync.sync_directory(folder, application, label_prefix, report)
+        # The CANopen slaves folder is export-only; the template carries the devices.
+        st_sync.sync_directory(folder, application, label_prefix, report, st_files.is_canopen_slaves_folder)
     return report

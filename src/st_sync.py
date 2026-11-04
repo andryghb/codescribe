@@ -121,8 +121,13 @@ def _last_line(error_text):
 # ---------------------------------------------------------------------------
 
 
-def sync_directory(dir_path, parent_obj, label_prefix, report):
-    """Apply the .st files under dir_path to the children of parent_obj."""
+def sync_directory(dir_path, parent_obj, label_prefix, report, is_ignored_folder=None):
+    """Apply the .st files under dir_path to the children of parent_obj.
+
+    is_ignored_folder, when given, names directories of dir_path itself (not
+    of its subdirectories) that are not read at all - the CANopen slaves
+    folder beside the application's contents.
+    """
     # Parents before their members: a POU (one dot in A.st) before its methods
     # (A.B.st), those before A.B.action.st. Directories first, then by name,
     # so the report reads the same on every run.
@@ -130,14 +135,28 @@ def sync_directory(dir_path, parent_obj, label_prefix, report):
 
     # What is gone from disk goes from the project first, so a member file
     # left behind by a deleted POU is reported as having no POU rather than
-    # applied to one that is about to go.
+    # applied to one that is about to go. An ignored folder still counts as
+    # present here, so a project folder of that name is never emptied.
     _remove_missing(parent_obj, entries, label_prefix, report)
+
+    if is_ignored_folder is not None:
+        ignored = [e for e in entries if os.path.isdir(os.path.join(dir_path, e)) and is_ignored_folder(e)]
+        for entry in ignored:
+            report.ignored.append(label_prefix + entry + "/")
+        entries = [e for e in entries if e not in ignored]
 
     for entry in entries:
         full_path = os.path.join(dir_path, entry)
         label = label_prefix + entry
 
         if os.path.isdir(full_path):
+            if not folder_has_st_files(full_path) and _find_child(parent_obj, entry, (ObjectType.FOLDER,)) is None:
+                # Nothing to import below it - an empty directory, or notes
+                # only - so no folder is made for it. An existing folder of
+                # that name is still walked below, so objects whose files are
+                # gone from it are removed.
+                report.ignored.append(label + "/")
+                continue
             try:
                 folder_obj, created = _ensure_folder(parent_obj, entry)
             except Exception:
