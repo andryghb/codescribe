@@ -66,13 +66,13 @@ The `GraphicalTesting` sample in this repository keeps a `codescribe.json` set t
 - GVLs, including persistent variable lists, as `<name>.gvl.st` (declaration only, no xml)
 - Visualisations as `<name>.vis.xml`, so the HMI is reviewable. Export-only: the import never reads it, and the project template carries the real object
 - The task configuration as `<name>.xml` (the name full mode uses, so switching modes does not rename it), with its tasks, so cycle times and the programs they call are reviewable. Export-only as well: the import ignores it and the template carries the real object
-- Each CANopen slave device as `<name>.canopen.xml`, wherever it sits in the device tree, so its node ID, SDOs and PDO mappings are reviewable. A slave is any device that plugs into a CANopen manager (its child connector is `Common.CANopen`), and it is exported with its modules. The manager, the CAN bus, a local CANopen device and J1939 devices are not exported. If two slaves on different managers share a name, the second is written as `<manager>.<name>.canopen.xml`. Export-only as well: the import ignores it and the template carries the real devices. When no slave is found, the message view lists the connector interfaces it did see
+- Each CANopen slave device as `CANOpen_Slaves/<name>.xml`, wherever it sits in the device tree, so its node ID, SDOs and PDO mappings are reviewable. A slave is any device that plugs into a CANopen manager (its child connector is `Common.CANopen`), and it is exported with its modules. The manager, the CAN bus, a local CANopen device and J1939 devices are not exported. If two slaves on different managers share a name, the second is written as `CANOpen_Slaves/<manager>.<name>.xml`. The folder is made only when there is a slave. Export-only as well: the import skips the whole folder and the template carries the real devices. `CANOpen_Slaves` is a reserved name, so the export refuses an application that has a top-level folder of that name. When no slave is found, the message view lists the connector interfaces it did see
 
 Nothing else is written: no `devices` or `communication` folders, no other device xml, no GVL or EVC xml, no library list, no visualisation manager, no graphical POU xml and no `.txt` renderings. The import also reads the `<device>/application` layout of earlier exports and of full mode, so a checkout made before this layout imports as it is; the next export rewrites it. A ladder, FBD, CFC or SFC POU is skipped, but its structured text methods and actions are still written beside where its file would be. The export dialog counts the files written and names every object it skipped.
 
 ### What the import does
 
-`Import From Files` reads only `.st` files and ignores everything else, the visualisation, task configuration and CANopen slave xml included. Each file is compared with the object it describes:
+`Import From Files` reads only `.st` files and ignores everything else, the visualisation and task configuration xml included, and skips the `CANOpen_Slaves` folder entirely. A directory with no `.st` file anywhere below it (an empty one, or one holding only notes) creates no folder in the project; an existing project folder of that name is kept. Each file is compared with the object it describes:
 
 - the object is missing: it is created and the text applied (**Added**)
 - the object exists but its declaration or implementation differs: the differing text is replaced in place (**Updated**)
@@ -214,7 +214,7 @@ If the target folder is locked (an open Explorer window, IDE, git client or anti
 
 If the export folder is a directory junction or symbolic link, for example `mklink /J <project_name> C:\repos\<repo>\<folder>` so that the export lands straight in a git checkout, the export writes through the link: the staged files are synced into the linked folder, files and empty directories the export did not write are removed from it, and the link itself stays in place. A `.git` entry inside the export folder is never removed, whichever path the export takes: an export folder that holds one is synced in place rather than swapped.
 
-`.md` files in the export folder and its subfolders are kept on every export, so notes can live beside the exported code. The export never writes or imports them. In `st-only` mode a directory holding only `.md` files is still read as a folder on import, so keep notes beside `.st` files or at the top of the export folder.
+`.md` files in the export folder and its subfolders are kept on every export, so notes can live beside the exported code. The export never writes or imports them, and in `st-only` mode a directory holding only `.md` files creates no folder on import.
 
 ## Status
 

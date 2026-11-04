@@ -675,17 +675,22 @@ try:
     )
     check_equal("two devices: nothing failed", report.failed, [])
 
-    # --- CANopen slaves are exported beside the application, export-only --------------------
+    # --- CANopen slaves are exported to CANOpen_Slaves, which the import skips ---------------
     can_folder = os.path.join(work, "can")
     os.mkdir(can_folder)
     project = build_project([("CODESYS_SoftPLC", build_application())])
     can = build_can_tree(find(project, "CODESYS_SoftPLC"))
     stats = st_export.export_project(project, can_folder)
     check_equal(
-        "CANopen: one xml per slave beside the .st files, a repeated name prefixed by its manager",
+        "CANopen: one xml per slave in CANOpen_Slaves, a repeated name prefixed by its manager",
         list_files(can_folder),
         sorted(
-            EXPECTED_FILES + ["CANopen_Manager_2.IO_Node.canopen.xml", "Drive_1.canopen.xml", "IO_Node.canopen.xml"]
+            EXPECTED_FILES
+            + [
+                "CANOpen_Slaves/CANopen_Manager_2.IO_Node.xml",
+                "CANOpen_Slaves/Drive_1.xml",
+                "CANOpen_Slaves/IO_Node.xml",
+            ]
         ),
     )
     check_equal("CANopen: the stats count the slaves", stats.canopen_slaves, 3)
@@ -696,16 +701,59 @@ try:
     check("CANopen: a J1939 ECU is not exported", not hasattr(can["ecu"], "exported_recursive"))
     check(
         "CANopen: the xml has its timestamp zeroed",
-        '<Single Name="Timestamp" Type="long">0</Single>' in read(os.path.join(can_folder, "Drive_1.canopen.xml")),
+        '<Single Name="Timestamp" Type="long">0</Single>'
+        in read(os.path.join(can_folder, "CANOpen_Slaves", "Drive_1.xml")),
     )
+    # A .st file in the slaves folder proves the import does not read it at all.
+    write(os.path.join(can_folder, "CANOpen_Slaves", "Sneaky.st"), "PROGRAM Sneaky\nVAR\nEND_VAR\n")
     project = build_project([("CODESYS_SoftPLC", build_template_application())])
     report = import_from_files.import_st_only(project, can_folder)
+    app = find(project, "CODESYS_SoftPLC", "Application")
+    check("CANopen: the import skips the slaves folder", "CANOpen_Slaves/" in report.ignored, repr(report.ignored))
+    check_equal("CANopen: no folder is created for it", app.find("CANOpen_Slaves"), [])
+    check_equal("CANopen: a .st file inside it is not imported", app.find("Sneaky", recursive=True), [])
+    check("CANopen: the rest still imports", "FB_Motor.st" in report.added, repr(report.failed))
+    check_equal("CANopen: nothing failed on import", report.failed, [])
+
+    # An application folder of the reserved name would be skipped on import.
+    project = build_project([("CODESYS_SoftPLC", build_application())])
+    find(project, "CODESYS_SoftPLC", "Application").add(FakeObject("canopen_slaves", ObjectType.FOLDER))
+    refused_folder = os.path.join(work, "refused")
+    os.mkdir(refused_folder)
+    try:
+        st_export.export_project(project, refused_folder)
+        check("CANopen: an application folder of the reserved name is refused", False, "no ValueError")
+    except ValueError as error:
+        check("CANopen: an application folder of the reserved name is refused", "reserves" in str(error), str(error))
+
+    # --- a directory with nothing to import creates no folder ------------------------------
+    sparse_folder = os.path.join(work, "sparse")
+    os.mkdir(sparse_folder)
+    st_export.StExporter().export_children(build_application(), sparse_folder)
+    os.mkdir(os.path.join(sparse_folder, "EmptyDir"))
+    os.makedirs(os.path.join(sparse_folder, "Utils", "Inner"))
+    os.mkdir(os.path.join(sparse_folder, "NotesOnly"))
+    write(os.path.join(sparse_folder, "NotesOnly", "README.md"), "notes\n")
+    os.mkdir(os.path.join(sparse_folder, "KeptEmpty"))
+    os.mkdir(os.path.join(sparse_folder, "Emptied"))
+    app = build_template_application()
+    app.add(FakeObject("KeptEmpty", ObjectType.FOLDER))
+    emptied = app.add(FakeObject("Emptied", ObjectType.FOLDER))
+    emptied.add(FakeObject("ST_Gone", ObjectType.POU, "PROGRAM ST_Gone\n", ";\n"))
+    report = st_sync.SyncReport()
+    st_sync.sync_directory(sparse_folder, app, "", report)
+    check_equal("an empty directory creates no folder", app.find("EmptyDir"), [])
+    check_equal("a directory holding only notes creates no folder", app.find("NotesOnly"), [])
+    check_equal("a nested empty directory creates no folder", find(app, "Utils").find("Inner"), [])
     check(
-        "CANopen: the import ignores the slave xml",
-        all(name in report.ignored for name in ("Drive_1.canopen.xml", "IO_Node.canopen.xml")),
+        "the skipped directories are listed as ignored",
+        all(label in report.ignored for label in ("EmptyDir/", "NotesOnly/", "Utils/Inner/")),
         repr(report.ignored),
     )
-    check_equal("CANopen: nothing failed on import", report.failed, [])
+    check("an existing folder with an empty directory stays", app.find("KeptEmpty") != [])
+    check("an existing folder whose files are all gone stays", app.find("Emptied") != [])
+    check_equal("its objects whose files are gone are removed", emptied.find("ST_Gone"), [])
+    check_equal("nothing failed with empty directories", report.failed, [])
 
     # --- an export folder with no .st file at all is refused, not applied ------------------
     empty_folder = os.path.join(work, "empty")

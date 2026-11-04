@@ -4,7 +4,7 @@
 Only objects with a textual body are written - POUs, methods, actions,
 transitions, properties, DUTs and GVLs - plus export-only xml the import
 never reads: visualisations as .vis.xml, the task configuration as
-<name>.xml and each CANopen slave device as <name>.canopen.xml, so all of
+<name>.xml and each CANopen slave device as CANOpen_Slaves/<name>.xml, so all of
 them can be reviewed in git while the project template keeps the real
 objects. Everything else (graphical POUs, EVCs, managers, unmapped objects,
 every other device) is left to the template and listed in the summary so
@@ -160,13 +160,25 @@ def export_project(project, staging_folder):
 
     One device: its application's contents go straight into the folder. More
     than one: a folder per device (see st_files.device_export_folder). Beside
-    them go the device's CANopen slaves; nothing else is written - no other
-    devices, no communication.
+    them, in a CANOpen_Slaves folder, go the device's CANopen slaves; nothing
+    else is written - no other devices, no communication.
     """
     exporter = StExporter()
     devices = list(get_device_entrypoints(project))
     for device_obj in devices:
         application = find_application(device_obj)
+        for child in application.get_children():
+            # The import skips that folder, so application code in a folder
+            # of the same name would never come back. Refuse before writing.
+            if st_files.is_canopen_slaves_folder(child.get_name()):
+                raise ValueError(
+                    "The application of "
+                    + device_obj.get_name()
+                    + " holds '"
+                    + child.get_name()
+                    + "', a name the export reserves for the CANopen slaves and the import skips."
+                    + " Rename it in CODESYS and export again."
+                )
         folder = st_files.device_export_folder(staging_folder, device_obj.get_name(), len(devices) == 1)
         if folder != staging_folder:
             os.mkdir(folder)
@@ -285,12 +297,12 @@ class StExporter(object):
         self.stats.st_files += 1
 
     def export_canopen_slaves(self, device_obj, application, folder):
-        """Write each CANopen slave under device_obj as <name>.canopen.xml in folder.
+        """Write each CANopen slave under device_obj as CANOpen_Slaves/<name>.xml in folder.
 
-        Export-only, like the visualisations: the import never reads these
-        files and the template carries the real devices. Recursive, so the
-        modules of a modular slave come with it; the node ID, SDOs and PDO
-        mappings are in the slave's own entry.
+        Export-only, like the visualisations: the import skips the folder and
+        the template carries the real devices. Recursive, so the modules of a
+        modular slave come with it; the node ID, SDOs and PDO mappings are in
+        the slave's own entry. The folder is made only when there is a slave.
         """
         slaves, seen = find_canopen_slaves(device_obj, application)
         if not slaves:
@@ -301,6 +313,8 @@ class StExporter(object):
                 + (", ".join(sorted(seen)) or "none")
             )
             return
+        slaves_folder = os.path.join(folder, st_files.CANOPEN_SLAVES_FOLDER)
+        os.mkdir(slaves_folder)
         written = set()
         for slave in slaves:
             name = slave.get_name()
@@ -309,9 +323,9 @@ class StExporter(object):
                 # Two slaves of one name on different managers: name the
                 # second by its manager too, rather than overwrite the first.
                 file_name = st_files.canopen_slave_file_name(slave.parent.get_name() + "." + name)
-            write_native(slave, os.path.join(folder, file_name), recursive=True)
+            write_native(slave, os.path.join(slaves_folder, file_name), recursive=True)
             written.add(file_name)
-            print("Exported CANopen slave " + name + " to " + file_name)
+            print("Exported CANopen slave " + name + " to " + st_files.CANOPEN_SLAVES_FOLDER + "/" + file_name)
             self.stats.canopen_slaves += 1
 
     def _skip_graphical(self, label):

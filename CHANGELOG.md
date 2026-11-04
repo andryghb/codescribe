@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CANopen slaves are exported into a `CANOpen_Slaves` folder as `<name>.xml`, instead of `<name>.canopen.xml` beside the `.st` files, and the import skips that folder entirely. The name is reserved: the export refuses an application with a top-level folder of that name, as the import would never read it.
+- The `st-only` import creates no folder for a directory with no `.st` file anywhere below it, such as an empty directory or one holding only `.md` notes, and lists it as ignored. An existing project folder of that name is kept, and objects whose files are gone from it are still removed.
 - In `st-only` mode each CANopen slave device is exported as `<name>.canopen.xml` beside the `.st` files, with its modules, so node IDs, SDOs and PDO mappings show in a diff. A slave is a device whose child connector is `Common.CANopen`, wherever it sits in the device tree; the manager, the CAN bus, local CANopen devices and J1939 devices are not exported. Export-only: the import ignores these files and the project template carries the real devices.
 - `Import From Files` in `st-only` mode no longer asks for confirmation before it starts. The report dialog afterwards lists every change, and an export folder with no `.st` file at all is still refused. Full mode still asks.
 - `.md` files in the export folder and its subfolders are kept on every export instead of being deleted with the rest of the previous export, so notes can live beside the exported code. An export folder that holds a `.git` entry is now synced in place rather than swapped: the swap deleted the repository along with the old copy of the folder, although the previous entry here said `.git` was never removed.
