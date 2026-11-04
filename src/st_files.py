@@ -76,6 +76,12 @@ def visualisation_file_name(name):
     return name + VISUALISATION_EXTENSION
 
 
+def canopen_slave_file_name(name):
+    # The suffix keeps a slave from colliding with a POU, a visualisation or
+    # the task configuration of the same name.
+    return name + ".canopen.xml"
+
+
 def task_configuration_file_name(name):
     # Same name as full mode writes, so switching modes does not rename it.
     return name + ".xml"
