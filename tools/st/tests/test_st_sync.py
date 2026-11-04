@@ -179,6 +179,42 @@ def build_project(applications):
     return project
 
 
+class FakeConnector(object):
+    def __init__(self, interface, role):
+        self.interface = interface
+        self.connector_role = role
+
+
+def fake_device(name, child=(), parent=()):
+    """A device with child connectors (what it plugs into) and parent connectors (what plugs into it).
+
+    Roles alternate between the .NET enum's name and its value, as
+    IronPython shows either depending on how it is read.
+    """
+    device = FakeObject(name, ObjectType.DEVICE)
+    device.connectors = [FakeConnector(i, "Child" if n % 2 else 1) for n, i in enumerate(child)]
+    device.connectors += [FakeConnector(i, "Parent" if n % 2 else 0) for n, i in enumerate(parent)]
+    return device
+
+
+def build_can_tree(device):
+    """CAN bus, CANopen manager with three slaves (one on a second manager), a local device and J1939."""
+    can0 = device.add(fake_device("CANbus", child=["Common.CANbusInterface"], parent=["Common.CANbus"]))
+    manager = can0.add(fake_device("CANopen_Manager", child=["Common.CANbus"], parent=["Common.CANopen"]))
+    drive = manager.add(fake_device("Drive_1", child=["Common.CANopen"]))
+    drive.add(fake_device("Drive_1_Module", child=["Local.Module"]))
+    io_node = manager.add(fake_device("IO_Node"))
+    # The role as IronPython prints a qualified .NET enum value.
+    io_node.connectors = [FakeConnector("Common.CANopen", "ConnectorRole.Child")]
+    can0.add(fake_device("CANopen_Device", child=["Common.CANbus"]))
+    can1 = device.add(fake_device("CANbus_1", child=["Common.CANbusInterface"], parent=["Common.CANbus"]))
+    manager2 = can1.add(fake_device("CANopen_Manager_2", child=["Common.CANbus"], parent=["Common.CANopen"]))
+    manager2.add(fake_device("IO_Node", child=["Common.CANopen"]))
+    j1939 = can1.add(fake_device("J1939_Manager", child=["Common.CANbus"], parent=["Common.J1939"]))
+    j1939.add(fake_device("Engine_ECU", child=["Common.J1939"]))
+    return {"manager": manager, "drive": drive, "local": can0.find("CANopen_Device")[0], "ecu": j1939.children[0]}
+
+
 def build_template_application():
     """What a template holds in ST-only mode: everything the export skips."""
     app = FakeObject("Application", ObjectType.UNKNOWN)
@@ -288,7 +324,11 @@ try:
         '<Single Name="Timestamp" Type="long">0</Single>' in read(os.path.join(export_folder, "Visu.vis.xml")),
     )
     summary = exporter.stats.summary()
-    check("summary counts", "Wrote 11 .st file(s), 1 visualisation(s) and 1 task configuration(s)." in summary, summary)
+    check(
+        "summary counts",
+        "Wrote 11 .st file(s), 1 visualisation(s), 1 task configuration(s) and 0 CANopen slave(s)." in summary,
+        summary,
+    )
     check("summary names the graphical POU", "LD_Main" in summary, summary)
 
     # --- import into a template: everything is added ---------------------------
@@ -585,6 +625,7 @@ try:
     stats = st_export.export_project(build_project([("CODESYS_SoftPLC", build_application())]), flat_folder)
     check_equal("one device: the application's contents are the export folder", list_files(flat_folder), EXPECTED_FILES)
     check_equal("one device: the stats come back", stats.st_files, 11)
+    check_equal("one device without a CAN bus: no CANopen slave", stats.canopen_slaves, 0)
 
     project = build_project([("CODESYS_SoftPLC", build_template_application())])
     report = import_from_files.import_st_only(project, flat_folder)
@@ -633,6 +674,38 @@ try:
         and find(project, "StandardPLC", "Application").find("FB_Motor") != [],
     )
     check_equal("two devices: nothing failed", report.failed, [])
+
+    # --- CANopen slaves are exported beside the application, export-only --------------------
+    can_folder = os.path.join(work, "can")
+    os.mkdir(can_folder)
+    project = build_project([("CODESYS_SoftPLC", build_application())])
+    can = build_can_tree(find(project, "CODESYS_SoftPLC"))
+    stats = st_export.export_project(project, can_folder)
+    check_equal(
+        "CANopen: one xml per slave beside the .st files, a repeated name prefixed by its manager",
+        list_files(can_folder),
+        sorted(
+            EXPECTED_FILES + ["CANopen_Manager_2.IO_Node.canopen.xml", "Drive_1.canopen.xml", "IO_Node.canopen.xml"]
+        ),
+    )
+    check_equal("CANopen: the stats count the slaves", stats.canopen_slaves, 3)
+    check("CANopen: the summary counts them", "and 3 CANopen slave(s)." in stats.summary(), stats.summary())
+    check("CANopen: a slave is exported with its modules", getattr(can["drive"], "exported_recursive", None) is True)
+    check("CANopen: the manager is not exported", not hasattr(can["manager"], "exported_recursive"))
+    check("CANopen: a local CANopen device is not exported", not hasattr(can["local"], "exported_recursive"))
+    check("CANopen: a J1939 ECU is not exported", not hasattr(can["ecu"], "exported_recursive"))
+    check(
+        "CANopen: the xml has its timestamp zeroed",
+        '<Single Name="Timestamp" Type="long">0</Single>' in read(os.path.join(can_folder, "Drive_1.canopen.xml")),
+    )
+    project = build_project([("CODESYS_SoftPLC", build_template_application())])
+    report = import_from_files.import_st_only(project, can_folder)
+    check(
+        "CANopen: the import ignores the slave xml",
+        all(name in report.ignored for name in ("Drive_1.canopen.xml", "IO_Node.canopen.xml")),
+        repr(report.ignored),
+    )
+    check_equal("CANopen: nothing failed on import", report.failed, [])
 
     # --- an export folder with no .st file at all is refused, not applied ------------------
     empty_folder = os.path.join(work, "empty")
