@@ -198,7 +198,7 @@ def fake_device(name, child=(), parent=()):
 
 
 def build_can_tree(device):
-    """CAN bus, CANopen manager with three slaves (one on a second manager), a local device and J1939."""
+    """Two CAN buses, each with a CANopen manager; three slaves, a local device and J1939."""
     can0 = device.add(fake_device("CANbus", child=["Common.CANbusInterface"], parent=["Common.CANbus"]))
     manager = can0.add(fake_device("CANopen_Manager", child=["Common.CANbus"], parent=["Common.CANopen"]))
     drive = manager.add(fake_device("Drive_1", child=["Common.CANopen"]))
@@ -208,11 +208,24 @@ def build_can_tree(device):
     io_node.connectors = [FakeConnector("Common.CANopen", "ConnectorRole.Child")]
     can0.add(fake_device("CANopen_Device", child=["Common.CANbus"]))
     can1 = device.add(fake_device("CANbus_1", child=["Common.CANbusInterface"], parent=["Common.CANbus"]))
-    manager2 = can1.add(fake_device("CANopen_Manager_2", child=["Common.CANbus"], parent=["Common.CANopen"]))
+    manager2 = can1.add(fake_device("CANopen_Manager_2"))
+    # The roles as IronPython prints a qualified .NET enum value.
+    manager2.connectors = [
+        FakeConnector("Common.CANbus", "ConnectorRole.Child"),
+        FakeConnector("Common.CANopen", "ConnectorRole.Parent"),
+    ]
     manager2.add(fake_device("IO_Node", child=["Common.CANopen"]))
     j1939 = can1.add(fake_device("J1939_Manager", child=["Common.CANbus"], parent=["Common.J1939"]))
     j1939.add(fake_device("Engine_ECU", child=["Common.J1939"]))
-    return {"manager": manager, "drive": drive, "local": can0.find("CANopen_Device")[0], "ecu": j1939.children[0]}
+    return {
+        "bus": can0,
+        "manager": manager,
+        "manager2": manager2,
+        "drive": drive,
+        "local": can0.find("CANopen_Device")[0],
+        "j1939": j1939,
+        "ecu": j1939.children[0],
+    }
 
 
 def build_template_application():
@@ -326,7 +339,9 @@ try:
     summary = exporter.stats.summary()
     check(
         "summary counts",
-        "Wrote 11 .st file(s), 1 visualisation(s), 1 task configuration(s) and 0 CANopen slave(s)." in summary,
+        "Wrote 11 .st file(s), 1 visualisation(s), 1 task configuration(s), 0 CANopen manager(s)"
+        + " and 0 CANopen slave(s)."
+        in summary,
         summary,
     )
     check("summary names the graphical POU", "LD_Main" in summary, summary)
@@ -625,7 +640,9 @@ try:
     stats = st_export.export_project(build_project([("CODESYS_SoftPLC", build_application())]), flat_folder)
     check_equal("one device: the application's contents are the export folder", list_files(flat_folder), EXPECTED_FILES)
     check_equal("one device: the stats come back", stats.st_files, 11)
-    check_equal("one device without a CAN bus: no CANopen slave", stats.canopen_slaves, 0)
+    check_equal(
+        "one device without a CAN bus: no CANopen device", (stats.canopen_managers, stats.canopen_slaves), (0, 0)
+    )
 
     project = build_project([("CODESYS_SoftPLC", build_template_application())])
     report = import_from_files.import_st_only(project, flat_folder)
@@ -675,49 +692,70 @@ try:
     )
     check_equal("two devices: nothing failed", report.failed, [])
 
-    # --- CANopen slaves are exported to CANOpen_Slaves, which the import skips ---------------
+    # --- CANopen managers and slaves are exported to _CANOpen, which the import skips --------
     can_folder = os.path.join(work, "can")
     os.mkdir(can_folder)
     project = build_project([("CODESYS_SoftPLC", build_application())])
     can = build_can_tree(find(project, "CODESYS_SoftPLC"))
     stats = st_export.export_project(project, can_folder)
     check_equal(
-        "CANopen: one xml per slave in CANOpen_Slaves, a repeated name prefixed by its manager",
+        "CANopen: one xml per manager and slave in _CANOpen, a repeated name prefixed by its manager",
         list_files(can_folder),
         sorted(
             EXPECTED_FILES
             + [
-                "CANOpen_Slaves/CANopen_Manager_2.IO_Node.xml",
-                "CANOpen_Slaves/Drive_1.xml",
-                "CANOpen_Slaves/IO_Node.xml",
+                "_CANOpen/CANopen_Manager.xml",
+                "_CANOpen/CANopen_Manager_2.IO_Node.xml",
+                "_CANOpen/CANopen_Manager_2.xml",
+                "_CANOpen/Drive_1.xml",
+                "_CANOpen/IO_Node.xml",
             ]
         ),
     )
-    check_equal("CANopen: the stats count the slaves", stats.canopen_slaves, 3)
-    check("CANopen: the summary counts them", "and 3 CANopen slave(s)." in stats.summary(), stats.summary())
+    check_equal(
+        "CANopen: the stats count the managers and slaves", (stats.canopen_managers, stats.canopen_slaves), (2, 3)
+    )
+    check(
+        "CANopen: the summary counts them",
+        "2 CANopen manager(s) and 3 CANopen slave(s)." in stats.summary(),
+        stats.summary(),
+    )
     check("CANopen: a slave is exported with its modules", getattr(can["drive"], "exported_recursive", None) is True)
-    check("CANopen: the manager is not exported", not hasattr(can["manager"], "exported_recursive"))
+    check(
+        "CANopen: a manager is exported without its slaves",
+        getattr(can["manager"], "exported_recursive", None) is False,
+    )
+    check(
+        "CANopen: a manager is found by either form of the role",
+        getattr(can["manager2"], "exported_recursive", None) is False,
+    )
+    check("CANopen: the CAN bus is not exported", not hasattr(can["bus"], "exported_recursive"))
     check("CANopen: a local CANopen device is not exported", not hasattr(can["local"], "exported_recursive"))
+    check("CANopen: a J1939 manager is not exported", not hasattr(can["j1939"], "exported_recursive"))
     check("CANopen: a J1939 ECU is not exported", not hasattr(can["ecu"], "exported_recursive"))
     check(
         "CANopen: the xml has its timestamp zeroed",
-        '<Single Name="Timestamp" Type="long">0</Single>'
-        in read(os.path.join(can_folder, "CANOpen_Slaves", "Drive_1.xml")),
+        '<Single Name="Timestamp" Type="long">0</Single>' in read(os.path.join(can_folder, "_CANOpen", "Drive_1.xml")),
     )
-    # A .st file in the slaves folder proves the import does not read it at all.
-    write(os.path.join(can_folder, "CANOpen_Slaves", "Sneaky.st"), "PROGRAM Sneaky\nVAR\nEND_VAR\n")
+    # A .st file in the CANopen folder proves the import does not read it at all.
+    write(os.path.join(can_folder, "_CANOpen", "Sneaky.st"), "PROGRAM Sneaky\nVAR\nEND_VAR\n")
+    # The folder of earlier exports holds only xml, so it creates nothing either.
+    os.mkdir(os.path.join(can_folder, "CANOpen_Slaves"))
+    write(os.path.join(can_folder, "CANOpen_Slaves", "Drive_1.xml"), "<xml/>\n")
     project = build_project([("CODESYS_SoftPLC", build_template_application())])
     report = import_from_files.import_st_only(project, can_folder)
     app = find(project, "CODESYS_SoftPLC", "Application")
-    check("CANopen: the import skips the slaves folder", "CANOpen_Slaves/" in report.ignored, repr(report.ignored))
-    check_equal("CANopen: no folder is created for it", app.find("CANOpen_Slaves"), [])
+    check("CANopen: the import skips the CANopen folder", "_CANOpen/" in report.ignored, repr(report.ignored))
+    check_equal("CANopen: no folder is created for it", app.find("_CANOpen"), [])
+    check("CANopen: the old slaves folder is ignored", "CANOpen_Slaves/" in report.ignored, repr(report.ignored))
+    check_equal("CANopen: no folder is created for the old one", app.find("CANOpen_Slaves"), [])
     check_equal("CANopen: a .st file inside it is not imported", app.find("Sneaky", recursive=True), [])
     check("CANopen: the rest still imports", "FB_Motor.st" in report.added, repr(report.failed))
     check_equal("CANopen: nothing failed on import", report.failed, [])
 
     # An application folder of the reserved name would be skipped on import.
     project = build_project([("CODESYS_SoftPLC", build_application())])
-    find(project, "CODESYS_SoftPLC", "Application").add(FakeObject("canopen_slaves", ObjectType.FOLDER))
+    find(project, "CODESYS_SoftPLC", "Application").add(FakeObject("_canopen", ObjectType.FOLDER))
     refused_folder = os.path.join(work, "refused")
     os.mkdir(refused_folder)
     try:

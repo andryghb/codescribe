@@ -4,9 +4,9 @@
 Only objects with a textual body are written - POUs, methods, actions,
 transitions, properties, DUTs and GVLs - plus export-only xml the import
 never reads: visualisations as .vis.xml, the task configuration as
-<name>.xml and each CANopen slave device as CANOpen_Slaves/<name>.xml, so all of
-them can be reviewed in git while the project template keeps the real
-objects. Everything else (graphical POUs, EVCs, managers, unmapped objects,
+<name>.xml and each CANopen manager and slave device as _CANOpen/<name>.xml,
+so all of them can be reviewed in git while the project template keeps the
+real objects. Everything else (graphical POUs, EVCs, managers, unmapped objects,
 every other device) is left to the template and listed in the summary so
 the export never drops something silently.
 """
@@ -24,9 +24,10 @@ MAX_SUMMARY_NAMES = 8
 
 # The connector a CANopen slave plugs into a CANopen manager with. The manager
 # carries it as a parent connector and plugs into the CAN bus with a
-# Common.CANbus child connector, so only the slaves (remote devices) have it
-# as a child connector.
+# Common.CANbus child connector, so only the managers have it as a parent
+# connector and only the slaves (remote devices) as a child connector.
 CANOPEN_INTERFACE = "Common.CANopen"
+CONNECTOR_ROLE_PARENT = 0
 CONNECTOR_ROLE_CHILD = 1
 
 
@@ -65,6 +66,7 @@ class ExportStats(object):
         self.st_files = 0
         self.visualisations = 0
         self.task_configurations = 0
+        self.canopen_managers = 0
         self.canopen_slaves = 0
         self.graphical = []  # objects with no textual body
         self.other = []  # (name, type) of objects that are not structured text
@@ -77,7 +79,9 @@ class ExportStats(object):
             + str(self.visualisations)
             + " visualisation(s), "
             + str(self.task_configurations)
-            + " task configuration(s) and "
+            + " task configuration(s), "
+            + str(self.canopen_managers)
+            + " CANopen manager(s) and "
             + str(self.canopen_slaves)
             + " CANopen slave(s)."
         ]
@@ -95,19 +99,18 @@ def _joined(names):
     return shown
 
 
-def _is_child_role(role):
+def _has_role(role, role_name, role_value):
     # ConnectorRole is a .NET enum: str() gives its name under IronPython and
     # int() its value. Either is enough.
-    if str(role).split(".")[-1] == "Child":
+    if str(role).split(".")[-1] == role_name:
         return True
     try:
-        return int(role) == CONNECTOR_ROLE_CHILD
+        return int(role) == role_value
     except (TypeError, ValueError):
         return False
 
 
-def child_interfaces(obj):
-    """The interfaces of the child connectors of a device; empty for anything else."""
+def _connector_interfaces(obj, role_name, role_value):
     try:
         connectors = obj.connectors
     except Exception:
@@ -115,11 +118,21 @@ def child_interfaces(obj):
     interfaces = []
     for connector in connectors or []:
         try:
-            if _is_child_role(connector.connector_role):
+            if _has_role(connector.connector_role, role_name, role_value):
                 interfaces.append(u"%s" % connector.interface)
         except Exception:
             continue
     return interfaces
+
+
+def child_interfaces(obj):
+    """The interfaces of the child connectors of a device; empty for anything else."""
+    return _connector_interfaces(obj, "Child", CONNECTOR_ROLE_CHILD)
+
+
+def parent_interfaces(obj):
+    """The interfaces of the parent connectors of a device; empty for anything else."""
+    return _connector_interfaces(obj, "Parent", CONNECTOR_ROLE_PARENT)
 
 
 def _is_application(obj, application):
@@ -131,13 +144,14 @@ def _is_application(obj, application):
         return False
 
 
-def find_canopen_slaves(device_obj, application):
-    """(CANopen slave devices anywhere under device_obj, child connector interfaces seen).
+def find_canopen_devices(device_obj, application):
+    """([(CANopen device, is_manager)] anywhere under device_obj, child connector interfaces seen).
 
-    The application is not walked, as no device lives in it. A slave is not
-    walked either: its modules are part of its own recursive export.
+    In tree order, so each manager comes before its slaves. The application
+    is not walked, as no device lives in it. A slave is not walked either:
+    its modules are part of its own recursive export.
     """
-    slaves = []
+    devices = []
     seen = set()
 
     def walk(obj):
@@ -147,12 +161,14 @@ def find_canopen_slaves(device_obj, application):
             interfaces = child_interfaces(child)
             seen.update(interfaces)
             if CANOPEN_INTERFACE in interfaces:
-                slaves.append(child)
+                devices.append((child, False))
                 continue
+            if CANOPEN_INTERFACE in parent_interfaces(child):
+                devices.append((child, True))
             walk(child)
 
     walk(device_obj)
-    return slaves, seen
+    return devices, seen
 
 
 def export_project(project, staging_folder):
@@ -160,8 +176,8 @@ def export_project(project, staging_folder):
 
     One device: its application's contents go straight into the folder. More
     than one: a folder per device (see st_files.device_export_folder). Beside
-    them, in a CANOpen_Slaves folder, go the device's CANopen slaves; nothing
-    else is written - no other devices, no communication.
+    them, in a _CANOpen folder, go the device's CANopen managers and slaves;
+    nothing else is written - no other devices, no communication.
     """
     exporter = StExporter()
     devices = list(get_device_entrypoints(project))
@@ -170,20 +186,20 @@ def export_project(project, staging_folder):
         for child in application.get_children():
             # The import skips that folder, so application code in a folder
             # of the same name would never come back. Refuse before writing.
-            if st_files.is_canopen_slaves_folder(child.get_name()):
+            if st_files.is_canopen_folder(child.get_name()):
                 raise ValueError(
                     "The application of "
                     + device_obj.get_name()
                     + " holds '"
                     + child.get_name()
-                    + "', a name the export reserves for the CANopen slaves and the import skips."
+                    + "', a name the export reserves for the CANopen devices and the import skips."
                     + " Rename it in CODESYS and export again."
                 )
         folder = st_files.device_export_folder(staging_folder, device_obj.get_name(), len(devices) == 1)
         if folder != staging_folder:
             os.mkdir(folder)
         exporter.export_children(application, folder)
-        exporter.export_canopen_slaves(device_obj, application, folder)
+        exporter.export_canopen(device_obj, application, folder)
     return exporter.stats
 
 
@@ -296,37 +312,44 @@ class StExporter(object):
                 f.write(child_obj.textual_implementation.text)
         self.stats.st_files += 1
 
-    def export_canopen_slaves(self, device_obj, application, folder):
-        """Write each CANopen slave under device_obj as CANOpen_Slaves/<name>.xml in folder.
+    def export_canopen(self, device_obj, application, folder):
+        """Write each CANopen manager and slave under device_obj as _CANOpen/<name>.xml in folder.
 
         Export-only, like the visualisations: the import skips the folder and
-        the template carries the real devices. Recursive, so the modules of a
-        modular slave come with it; the node ID, SDOs and PDO mappings are in
-        the slave's own entry. The folder is made only when there is a slave.
+        the template carries the real devices. A manager is written alone, as
+        its slaves have files of their own. A slave is written recursively, so
+        the modules of a modular slave come with it; the node ID, SDOs and PDO
+        mappings are in the slave's own entry. The folder is made only when
+        there is a manager or a slave.
         """
-        slaves, seen = find_canopen_slaves(device_obj, application)
-        if not slaves:
+        devices, seen = find_canopen_devices(device_obj, application)
+        if not devices:
             print(
-                "No CANopen slave found under "
+                "No CANopen manager or slave found under "
                 + device_obj.get_name()
                 + "; child connector interfaces seen: "
                 + (", ".join(sorted(seen)) or "none")
             )
             return
-        slaves_folder = os.path.join(folder, st_files.CANOPEN_SLAVES_FOLDER)
-        os.mkdir(slaves_folder)
+        canopen_folder = os.path.join(folder, st_files.CANOPEN_FOLDER)
+        os.mkdir(canopen_folder)
         written = set()
-        for slave in slaves:
-            name = slave.get_name()
-            file_name = st_files.canopen_slave_file_name(name)
+        for device, is_manager in devices:
+            name = device.get_name()
+            file_name = st_files.canopen_device_file_name(name)
             if file_name in written:
-                # Two slaves of one name on different managers: name the
-                # second by its manager too, rather than overwrite the first.
-                file_name = st_files.canopen_slave_file_name(slave.parent.get_name() + "." + name)
-            write_native(slave, os.path.join(slaves_folder, file_name), recursive=True)
+                # Two devices of one name, such as slaves on different
+                # managers: name the second by its parent too, rather than
+                # overwrite the first.
+                file_name = st_files.canopen_device_file_name(device.parent.get_name() + "." + name)
+            write_native(device, os.path.join(canopen_folder, file_name), recursive=not is_manager)
             written.add(file_name)
-            print("Exported CANopen slave " + name + " to " + st_files.CANOPEN_SLAVES_FOLDER + "/" + file_name)
-            self.stats.canopen_slaves += 1
+            kind = "manager" if is_manager else "slave"
+            print("Exported CANopen " + kind + " " + name + " to " + st_files.CANOPEN_FOLDER + "/" + file_name)
+            if is_manager:
+                self.stats.canopen_managers += 1
+            else:
+                self.stats.canopen_slaves += 1
 
     def _skip_graphical(self, label):
         print("Not exported (no ST body): " + label)

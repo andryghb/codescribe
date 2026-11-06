@@ -76,18 +76,19 @@ def visualisation_file_name(name):
     return name + VISUALISATION_EXTENSION
 
 
-# The CANopen slaves are written to this folder beside the application's
-# contents, and the import skips it. The name is reserved: an application
-# folder of the same name would be skipped too, so the export refuses one.
-CANOPEN_SLAVES_FOLDER = "CANOpen_Slaves"
+# The CANopen managers and slaves are written to this folder beside the
+# application's contents, and the import skips it. The name is reserved: an
+# application folder of the same name would be skipped too, so the export
+# refuses one.
+CANOPEN_FOLDER = "_CANOpen"
 
 
-def is_canopen_slaves_folder(name):
+def is_canopen_folder(name):
     # Windows paths are case-insensitive, so the match is too.
-    return name.lower() == CANOPEN_SLAVES_FOLDER.lower()
+    return name.lower() == CANOPEN_FOLDER.lower()
 
 
-def canopen_slave_file_name(name):
+def canopen_device_file_name(name):
     return name + ".xml"
 
 

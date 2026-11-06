@@ -125,8 +125,8 @@ def sync_directory(dir_path, parent_obj, label_prefix, report, is_ignored_folder
     """Apply the .st files under dir_path to the children of parent_obj.
 
     is_ignored_folder, when given, names directories of dir_path itself (not
-    of its subdirectories) that are not read at all - the CANopen slaves
-    folder beside the application's contents.
+    of its subdirectories) that are not read at all - the CANopen folder
+    beside the application's contents.
     """
     # Parents before their members: a POU (one dot in A.st) before its methods
     # (A.B.st), those before A.B.action.st. Directories first, then by name,
